@@ -54,29 +54,72 @@ CREATE TABLE IF NOT EXISTS playlist_entries (
 const id = () =>
   Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 
-let db;
+let db = null;
+let dbReady = false;
+
+// ---------- Boot ----------
 
 async function start() {
-  const SQL = await initSqlJs({ locateFile: () => SQL_WASM_URL });
+  try {
+    const SQL = await initSqlJs({ locateFile: () => SQL_WASM_URL });
 
-  const saved = localStorage.getItem('musync.db');
-  if (saved) {
-    const bytes = Uint8Array.from(atob(saved), c => c.charCodeAt(0));
-    db = new SQL.Database(bytes);
-  } else {
-    db = new SQL.Database();
+    // Try to restore; if anything is wrong with the saved DB, start fresh.
+    let restored = false;
+    const saved = localStorage.getItem('musync.db');
+    if (saved) {
+      try {
+        const bytes = Uint8Array.from(atob(saved), c => c.charCodeAt(0));
+        db = new SQL.Database(bytes);
+        // sanity check: does the restored DB have the new tables?
+        db.exec('SELECT 1 FROM artists LIMIT 1');
+        restored = true;
+      } catch (e) {
+        console.warn('Saved DB is incompatible, starting fresh.', e);
+        localStorage.removeItem('musync.db');
+        db = null;
+      }
+    }
+
+    if (!restored) {
+      db = new SQL.Database();
+    }
+
+    db.run(SCHEMA);
+    persist();
+    dbReady = true;
+    render();
+    setStatus('');
+  } catch (err) {
+    console.error('muSync failed to start:', err);
+    setStatus('Database failed to load. Open the console for details.');
   }
-
-  db.run(SCHEMA);
-  persist();
-  render();
 }
 
 function persist() {
-  const data = db.export();
-  let s = '';
-  for (const b of data) s += String.fromCharCode(b);
-  localStorage.setItem('musync.db', btoa(s));
+  if (!db) return;
+  try {
+    const data = db.export();
+    let s = '';
+    for (const b of data) s += String.fromCharCode(b);
+    localStorage.setItem('musync.db', btoa(s));
+  } catch (e) {
+    console.warn('Failed to persist DB:', e);
+  }
+}
+
+// ---------- Status line ----------
+
+function setStatus(msg) {
+  let el = document.getElementById('status');
+  if (!el) {
+    el = document.createElement('p');
+    el.id = 'status';
+    el.className = 'muted';
+    const panel = document.querySelector('.panel');
+    panel?.appendChild(el);
+  }
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
 }
 
 // ---------- Artist + Credit helpers ----------
@@ -98,9 +141,8 @@ function upsertArtist(name) {
   return artistId;
 }
 
-// "Artist A; Artist B; Artist C" → main + featured
 function parseArtistString(raw) {
-  const parts = raw
+  const parts = (raw || '')
     .split(';')
     .map(s => s.trim())
     .filter(Boolean);
@@ -116,13 +158,14 @@ function parseArtistString(raw) {
 // ---------- Add song ----------
 
 function addSong(title, artistRaw) {
-  const cleanTitle = title.trim();
-  if (!cleanTitle) return;
+  const cleanTitle = (title || '').trim();
+  if (!cleanTitle) {
+    setStatus('Please enter a song title.');
+    return;
+  }
 
-  const parsed = parseArtistString(artistRaw || '');
-  const displayCredit = parsed.length
-    ? parsed.map(p => p.name).join('; ')
-    : null;
+  const parsed = parseArtistString(artistRaw);
+  const displayCredit = parsed.length ? parsed.map(p => p.name).join('; ') : null;
 
   const workId = id();
   const recId = id();
@@ -161,6 +204,7 @@ function addSong(title, artistRaw) {
 
   persist();
   render();
+  setStatus('');
 }
 
 // ---------- Read back ----------
@@ -200,6 +244,7 @@ function listSongs() {
 }
 
 function render() {
+  if (!dbReady) return;
   const list = document.getElementById('list');
   const empty = document.getElementById('empty');
   const songs = listSongs();
@@ -225,6 +270,10 @@ function escapeHtml(str) {
 // ---------- Wire up ----------
 
 document.getElementById('add').addEventListener('click', () => {
+  if (!dbReady) {
+    setStatus('Database is still loading. Try again in a second.');
+    return;
+  }
   const title = document.getElementById('title').value;
   const artist = document.getElementById('artist').value;
   addSong(title, artist);
