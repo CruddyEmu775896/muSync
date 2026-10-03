@@ -81,18 +81,22 @@ async function start() {
     let restored = false;
     const saved = localStorage.getItem('musync.db');
     if (saved) {
-      try {
-        const bytes = Uint8Array.from(atob(saved), c => c.charCodeAt(0));
-        db = new SQL.Database(bytes);
-        db.exec('SELECT 1 FROM artists LIMIT 1');
-        db.exec('SELECT 1 FROM media LIMIT 1');
-        restored = true;
-      } catch (e) {
-        console.warn('Saved DB incompatible, starting fresh.', e);
-        localStorage.removeItem('musync.db');
-        db = null;
-      }
-    }
+  try {
+    const bytes = Uint8Array.from(atob(saved), c => c.charCodeAt(0));
+    db = new SQL.Database(bytes);
+    // Don't require newer tables to exist. Just make sure it opens.
+    db.exec('SELECT 1');
+    restored = true;
+    // Make sure newer tables get added if they're missing
+    db.run(SCHEMA);
+  } catch (e) {
+    console.warn('Saved DB corrupted. Keeping a backup before reset.', e);
+    // Save the broken one under a rescue key so it's not lost
+    try { localStorage.setItem('musync.db.broken', saved); } catch {}
+    localStorage.removeItem('musync.db');
+    db = null;
+  }
+}
 
     if (!restored) db = new SQL.Database();
 
