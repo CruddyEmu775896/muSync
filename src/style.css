@@ -72,3 +72,42 @@ li {
 li:last-child { border-bottom: none; }
 
 .muted { color: var(--muted); font-size: 14px; }
+
+.player {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #141418;
+  border-top: 1px solid #23232a;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 10;
+}
+
+.player-info { min-width: 180px; }
+
+.player-title { font-weight: 600; font-size: 14px; }
+.player-artist { font-size: 12px; }
+
+.player audio { flex: 1; height: 32px; }
+
+body { padding-bottom: 96px; }
+
+li .actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+li button.small {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #23232a;
+  color: var(--text);
+  border: 1px solid #2e2e36;
+  cursor: pointer;
+}
