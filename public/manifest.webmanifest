@@ -1,0 +1,9 @@
+{
+  "name": "muSync",
+  "short_name": "muSync",
+  "start_url": "/musync/",
+  "display": "standalone",
+  "background_color": "#0e0e10",
+  "theme_color": "#0e0e10",
+  "icons": []
+}
