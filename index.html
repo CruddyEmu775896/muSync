@@ -25,6 +25,15 @@
       <p id="empty" class="muted">No songs yet.</p>
     </section>
   </main>
+
+<footer id="player" class="player" hidden>
+  <div class="player-info">
+    <div id="player-title" class="player-title">—</div>
+    <div id="player-artist" class="player-artist muted"></div>
+  </div>
+  <audio id="audio" controls preload="metadata"></audio>
+</footer>
+
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>
