@@ -1,10 +1,9 @@
 import './style.css';
 import '../public/manifest.webmanifest';
 import initSqlJs from 'sql.js';
+import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 
-const SQL_WASM_URL =
-  'https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.wasm';
-
+const SQL_WASM_URL = wasmUrl;
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS artists (
   id TEXT PRIMARY KEY,
