@@ -24,6 +24,17 @@
       <ul id="list"></ul>
       <p id="empty" class="muted">No songs yet.</p>
     </section>
+
+<section class="panel">
+  <h2>Backup</h2>
+  <p class="muted" style="margin-top:0">Save your library as a file, or restore from one.</p>
+  <div style="display:flex; gap:8px; flex-wrap:wrap">
+    <button id="export-db">Download library</button>
+    <button id="import-db">Upload library</button>
+    <input id="import-file" type="file" accept=".db,.sqlite,application/octet-stream" hidden />
+  </div>
+  <p id="backup-status" class="muted" style="margin-bottom:0"></p>
+</section>    
   </main>
 
 <footer id="player" class="player" hidden>
