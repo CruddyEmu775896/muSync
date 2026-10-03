@@ -1,4 +1,6 @@
 import initSqlJs from 'sql.js';
+import './style.css';
+import '../public/manifest.webmanifest';
 
 const SQL_WASM_URL =
   'https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.wasm';
