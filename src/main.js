@@ -101,6 +101,25 @@ async function start() {
     if (!restored) db = new SQL.Database();
 
     db.run(SCHEMA);
+
+function persist() {
+  if (!db) return;
+  try {
+    const data = db.export();
+    let s = '';
+    for (const b of data) s += String.fromCharCode(b);
+    localStorage.setItem('musync.db', btoa(s));
+
+    // Rolling local backup once per session
+    if (!sessionStorage.getItem('musync.backup.taken')) {
+      localStorage.setItem('musync.db.backup', btoa(s));
+      sessionStorage.setItem('musync.backup.taken', '1');
+    }
+  } catch (e) {
+    console.warn('Failed to persist DB:', e);
+  }
+}
+
     persist();
     dbReady = true;
     render();
