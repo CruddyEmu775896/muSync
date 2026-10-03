@@ -364,4 +364,58 @@ document.getElementById('add').addEventListener('click', () => {
   document.getElementById('artist').value = '';
 });
 
+// ---------- Backup ----------
+
+function exportDatabase() {
+  if (!db) return;
+  const data = db.export();
+  const blob = new Blob([data], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  a.href = url;
+  a.download = `musync-${stamp}.db`;
+  a.click();
+  URL.revokeObjectURL(url);
+  setBackupStatus(`Downloaded ${a.download}`);
+}
+
+function importDatabase(file) {
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const SQL = await initSqlJs({ locateFile: () => SQL_WASM_URL });
+      const bytes = new Uint8Array(reader.result);
+      const next = new SQL.Database(bytes);
+      // sanity: does it have our tables?
+      next.exec('SELECT 1 FROM works LIMIT 1');
+      db = next;
+      persist();
+      render();
+      setBackupStatus(`Imported ${file.name}`);
+    } catch (e) {
+      console.error(e);
+      setBackupStatus('That file does not look like a muSync library.');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function setBackupStatus(msg) {
+  const el = document.getElementById('backup-status');
+  if (el) el.textContent = msg || '';
+}
+
+document.getElementById('export-db').addEventListener('click', exportDatabase);
+
+document.getElementById('import-db').addEventListener('click', () => {
+  document.getElementById('import-file').click();
+});
+
+document.getElementById('import-file').addEventListener('change', (e) => {
+  const f = e.target.files?.[0];
+  if (f) importDatabase(f);
+  e.target.value = '';
+});
+
 start();
