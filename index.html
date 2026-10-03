@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>muSync</title>
+  <link rel="manifest" href="/musync/manifest.webmanifest" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <header>
+    <h1>muSync</h1>
+    <p class="sub">Local-first music organizer</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Add a song</h2>
+      <input id="title" placeholder="Song title" />
+      <input id="artist" placeholder="Artist" />
+      <button id="add">Add</button>
+    </section>
+
+    <section class="panel">
+      <h2>Library</h2>
+      <ul id="list"></ul>
+      <p id="empty" class="muted">No songs yet.</p>
+    </section>
+  </main>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
