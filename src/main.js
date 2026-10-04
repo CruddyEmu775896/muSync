@@ -1,3 +1,6 @@
+**File:** `src/main.js`
+
+```js
 import './style.css';
 import '../public/manifest.webmanifest';
 import initSqlJs from 'sql.js';
@@ -874,7 +877,6 @@ function setBackupStatus(msg) {
 // ---------- CSV import ----------
 
 function parseCSV(text) {
-  // RFC 4180-ish parser: handles quoted fields, escaped quotes, CRLF, LF
   const rows = [];
   let row = [];
   let field = '';
@@ -912,7 +914,6 @@ function parseCSV(text) {
       continue;
     }
     if (ch === '\r') {
-      // swallow; \n will end the line
       i++;
       continue;
     }
@@ -929,7 +930,6 @@ function parseCSV(text) {
     i++;
   }
 
-  // Last field/row
   if (field.length || row.length) {
     row.push(field);
     rows.push(row);
@@ -939,29 +939,31 @@ function parseCSV(text) {
 }
 
 function findColumns(headerRow) {
-  const normalized = headerRow.map(h => h.trim().toLowerCase());
-
-  // Title: accept "title", "track name", "song", "name"
-  const titleIdx = normalized.findIndex(h =>
-    h.includes('title') ||
-    h.includes('track name') ||
-    h === 'song' ||
-    h === 'name'
+  const titleIdx = headerRow.findIndex(h =>
+    h.trim().toLowerCase().includes('track name')
+  );
+  const artistIdx = headerRow.findIndex(h =>
+    h.trim().toLowerCase().includes('artist name')
   );
 
-  // Artist: accept "artist", "artists", "artist name(s)", "artist name"
-  const artistIdx = normalized.findIndex(h =>
-    h.includes('artist')
-  );
+  const titleFallback = titleIdx === -1
+    ? headerRow.findIndex(h => h.trim().toLowerCase() === 'title')
+    : titleIdx;
+  const artistFallback = artistIdx === -1
+    ? headerRow.findIndex(h => h.trim().toLowerCase() === 'artist')
+    : artistIdx;
 
-  return { titleIdx, artistIdx };
+  return {
+    titleIdx: titleFallback,
+    artistIdx: artistFallback
+  };
 }
 
 function importCSV(file) {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const text = String(reader.result).replace(/^\uFEFF/, ''); // strip BOM
+      const text = String(reader.result).replace(/^\uFEFF/, '');
       const rows = parseCSV(text);
 
       if (rows.length < 2) {
@@ -973,90 +975,11 @@ function importCSV(file) {
       const { titleIdx, artistIdx } = findColumns(header);
 
       if (titleIdx === -1) {
-        setCsvStatus('Could not find a title column.');
+        setCsvStatus('Could not find a track/title column.');
         return;
       }
       if (artistIdx === -1) {
         setCsvStatus('Could not find an artist column.');
-        return;
-      }
-
-      // Dedupe within this import by (title + artist), case-sensitive
-      const seen = new Set();
-
-      let added = 0;
-      let skippedEmpty = 0;
-      let skippedUndefined = 0;
-      let skippedDuplicate = 0;
-      let skippedPodcast = 0;
-
-      for (let r = 1; r < rows.length; r++) {
-        const row = rows[r];
-        const rawTitle = (row[titleIdx] ?? '').toString().trim();
-        const rawArtist = (row[artistIdx] ?? '').toString().trim();
-
-        // Skip podcast episodes: first column starts with "spotify:episode:"
-        const firstCol = (row[0] ?? '').toString();
-        if (firstCol.startsWith('spotify:episode:')) {
-          skippedPodcast++;
-          continue;
-        }
-
-        // Skip empty titles
-        if (!rawTitle) {
-          skippedEmpty++;
-          continue;
-        }
-
-        // Skip merged-file artifacts
-        if (rawTitle.toLowerCase() === 'undefined') {
-          skippedUndefined++;
-          continue;
-        }
-
-        // Skip duplicates within this import
-        const key = `${rawTitle}|||${rawArtist}`;
-        if (seen.has(key)) {
-          skippedDuplicate++;
-          continue;
-        }
-        seen.add(key);
-
-        // Strip a trailing "undefined" from the artist field if present
-        const cleanedArtist =
-          rawArtist.toLowerCase() === 'undefined' ? '' : rawArtist;
-
-        addSongInternal(rawTitle, cleanedArtist);
-        added++;
-      }
-
-      persist();
-      render();
-      renderKnowledge();
-
-      const parts = [`Imported ${added} song${added === 1 ? '' : 's'}`];
-      if (skippedDuplicate) parts.push(`${skippedDuplicate} duplicates skipped`);
-      if (skippedEmpty) parts.push(`${skippedEmpty} empty titles`);
-      if (skippedUndefined) parts.push(`${skippedUndefined} undefined`);
-      if (skippedPodcast) parts.push(`${skippedPodcast} podcast episodes skipped`);
-
-      setCsvStatus(parts.join(' · ') + '.');
-    } catch (e) {
-      console.error(e);
-      setCsvStatus('Failed to parse CSV. Check the console for details.');
-    }
-  };
-  reader.readAsText(file);
-}
-      const header = rows[0];
-      const { titleIdx, artistIdx } = findColumns(header);
-
-      if (titleIdx === -1) {
-        setCsvStatus('Could not find a title column. Header must contain "title".');
-        return;
-      }
-      if (artistIdx === -1) {
-        setCsvStatus('Could not find an artist column. Header must contain "artist".');
         return;
       }
 
@@ -1065,15 +988,21 @@ function importCSV(file) {
 
       for (let r = 1; r < rows.length; r++) {
         const row = rows[r];
-        const title = (row[titleIdx] ?? '').toString();
-        const artist = (row[artistIdx] ?? '').toString();
+        const title = (row[titleIdx] ?? '').toString().trim();
+        let artist = (row[artistIdx] ?? '').toString().trim();
 
-        if (!title.trim()) {
+        if (!title || title.toLowerCase() === 'undefined') {
           skipped++;
           continue;
         }
+        if (artist.toLowerCase() === 'undefined') {
+          artist = '';
+        }
 
-        addSongInternal(title.trim(), artist);
+        const parts = artist.split(/[;,]/).map(s => s.trim()).filter(Boolean);
+        const normalizedArtist = parts.join('; ');
+
+        addSongInternal(title, normalizedArtist);
         added++;
       }
 
@@ -1150,3 +1079,4 @@ document.getElementById('import-csv-file').addEventListener('change', (e) => {
 });
 
 start();
+```
