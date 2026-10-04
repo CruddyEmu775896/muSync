@@ -60,6 +60,20 @@
       </div>
       <p id="backup-status" class="muted" style="margin-bottom:0"></p>
     </section>
+
+    <section class="panel">
+      <h2>Import from CSV</h2>
+      <p class="muted" style="margin-top:0">
+        Your CSV needs two columns: one for the song title, one for the artist.
+        Header names are matched loosely (anything containing "title" and "artist").
+        Case is preserved exactly.
+      </p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <button id="import-csv-btn">Upload CSV</button>
+        <input id="import-csv-file" type="file" accept=".csv,text/csv" hidden />
+      </div>
+      <p id="csv-status" class="muted" style="margin-bottom:0"></p>
+    </section>
   </main>
 
   <footer id="player" class="player" hidden>
