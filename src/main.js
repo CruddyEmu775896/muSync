@@ -835,4 +835,230 @@ function exportDatabase() {
   const blob = new Blob([data], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const stamp =
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  a.href = url;
+  a.download = `musync-${stamp}.db`;
+  a.click();
+  URL.revokeObjectURL(url);
+  setBackupStatus(`Downloaded ${a.download}`);
+}
+
+function importDatabase(file) {
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const SQL = await initSqlJs({ locateFile: () => SQL_WASM_URL });
+      const bytes = new Uint8Array(reader.result);
+      const next = new SQL.Database(bytes);
+      next.exec('SELECT 1 FROM works LIMIT 1');
+      next.run(SCHEMA);
+      db = next;
+      persist();
+      render();
+      renderKnowledge();
+      renderWeights();
+      setBackupStatus(`Imported ${file.name}`);
+    } catch (e) {
+      console.error(e);
+      setBackupStatus('That file does not look like a muSync library.');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function setBackupStatus(msg) {
+  const el = document.getElementById('backup-status');
+  if (el) el.textContent = msg || '';
+}
+
+// ---------- CSV import ----------
+
+function parseCSV(text) {
+  // RFC 4180-ish parser: handles quoted fields, escaped quotes, CRLF, LF
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  let i = 0;
+
+  while (i < text.length) {
+    const ch = text[i];
+
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      field += ch;
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      inQuotes = true;
+      i++;
+      continue;
+    }
+    if (ch === ',') {
+      row.push(field);
+      field = '';
+      i++;
+      continue;
+    }
+    if (ch === '\r') {
+      // swallow; \n will end the line
+      i++;
+      continue;
+    }
+    if (ch === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+      i++;
+      continue;
+    }
+
+    field += ch;
+    i++;
+  }
+
+  // Last field/row
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function findColumns(headerRow) {
+  const titleIdx = headerRow.findIndex(h =>
+    h.trim().toLowerCase().includes('title')
+  );
+  const artistIdx = headerRow.findIndex(h =>
+    h.trim().toLowerCase().includes('artist')
+  );
+  return { titleIdx, artistIdx };
+}
+
+function importCSV(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const text = String(reader.result).replace(/^\uFEFF/, ''); // strip BOM
+      const rows = parseCSV(text);
+
+      if (rows.length < 2) {
+        setCsvStatus('CSV is empty or has no data rows.');
+        return;
+      }
+
+      const header = rows[0];
+      const { titleIdx, artistIdx } = findColumns(header);
+
+      if (titleIdx === -1) {
+        setCsvStatus('Could not find a title column. Header must contain "title".');
+        return;
+      }
+      if (artistIdx === -1) {
+        setCsvStatus('Could not find an artist column. Header must contain "artist".');
+        return;
+      }
+
+      let added = 0;
+      let skipped = 0;
+
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        const title = (row[titleIdx] ?? '').toString();
+        const artist = (row[artistIdx] ?? '').toString();
+
+        if (!title.trim()) {
+          skipped++;
+          continue;
+        }
+
+        addSongInternal(title.trim(), artist);
+        added++;
+      }
+
+      persist();
+      render();
+      renderKnowledge();
+
+      setCsvStatus(`Imported ${added} song${added === 1 ? '' : 's'}${skipped ? `, skipped ${skipped}` : ''}.`);
+    } catch (e) {
+      console.error(e);
+      setCsvStatus('Failed to parse CSV. Check the console for details.');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function setCsvStatus(msg) {
+  const el = document.getElementById('csv-status');
+  if (el) el.textContent = msg || '';
+}
+
+// ---------- Wire up ----------
+
+document.getElementById('add').addEventListener('click', () => {
+  if (!dbReady) {
+    setStatus('Database is still loading. Try again in a second.');
+    return;
+  }
+  const title = document.getElementById('title').value;
+  const artist = document.getElementById('artist').value;
+  addSong(title, artist);
+  document.getElementById('title').value = '';
+  document.getElementById('artist').value = '';
+});
+
+document.getElementById('refresh-knowledge').addEventListener('click', renderKnowledge);
+
+document.getElementById('save-weights').addEventListener('click', () => {
+  const w = readWeightsFromUI();
+  saveWeights(w);
+  document.getElementById('weights-status').textContent = 'Saved.';
+  setTimeout(() => {
+    document.getElementById('weights-status').textContent = '';
+  }, 2000);
+});
+
+document.getElementById('reset-weights').addEventListener('click', () => {
+  saveWeights({ ...DEFAULT_WEIGHTS });
+  renderWeights();
+  document.getElementById('weights-status').textContent = 'Reset to defaults.';
+  setTimeout(() => {
+    document.getElementById('weights-status').textContent = '';
+  }, 2000);
+});
+
+document.getElementById('export-db').addEventListener('click', exportDatabase);
+document.getElementById('import-db').addEventListener('click', () => {
+  document.getElementById('import-file').click();
+});
+document.getElementById('import-file').addEventListener('change', (e) => {
+  const f = e.target.files?.[0];
+  if (f) importDatabase(f);
+  e.target.value = '';
+});
+
+document.getElementById('import-csv-btn').addEventListener('click', () => {
+  document.getElementById('import-csv-file').click();
+});
+
+document.getElementById('import-csv-file').addEventListener('change', (e) => {
+  const f = e.target.files?.[0];
+  if (f) importCSV(f);
+  e.target.value = '';
+});
+
+start();
