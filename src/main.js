@@ -745,4 +745,4 @@ document.getElementById('import-file').addEventListener('change', (e) => {
   e.target.value = '';
 });
 
-
+start();
