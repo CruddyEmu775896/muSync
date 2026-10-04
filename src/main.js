@@ -736,4 +736,13 @@ document.getElementById('reset-weights').addEventListener('click', () => {
 });
 
 document.getElementById('export-db').addEventListener('click', exportDatabase);
-document.getElementById('import-db').addEventListener('
+document.getElementById('import-db').addEventListener('click', () => {
+  document.getElementById('import-file').click();
+});
+document.getElementById('import-file').addEventListener('change', (e) => {
+  const f = e.target.files?.[0];
+  if (f) importDatabase(f);
+  e.target.value = '';
+});
+
+
