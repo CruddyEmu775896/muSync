@@ -6,6 +6,13 @@ import { saveFile, getFile } from './idb.js';
 
 const SQL_WASM_URL = wasmUrl;
 
+const DEFAULT_WEIGHTS = {
+  transition: 40,
+  novelty: 25,
+  timeOfDay: 20,
+  skipPenalty: 15
+};
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS artists (
   id TEXT PRIMARY KEY,
@@ -64,6 +71,41 @@ CREATE TABLE IF NOT EXISTS playlist_entries (
   work_id TEXT REFERENCES works(id) ON DELETE CASCADE,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS playback_sessions (
+  id TEXT PRIMARY KEY,
+  start_time TEXT NOT NULL,
+  end_time TEXT,
+  mode TEXT NOT NULL DEFAULT 'MANUAL',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS listening_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES playback_sessions(id) ON DELETE CASCADE,
+  timestamp TEXT NOT NULL,
+  work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+  recording_id TEXT,
+  media_id TEXT,
+  mode TEXT NOT NULL DEFAULT 'MANUAL',
+  event_type TEXT NOT NULL,
+  position_ms INTEGER,
+  duration_played_ms INTEGER,
+  completion_percent REAL,
+  skipped_after_ms INTEGER,
+  manual_selection INTEGER NOT NULL DEFAULT 0,
+  previous_event_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_le_work ON listening_events(work_id);
+CREATE INDEX IF NOT EXISTS idx_le_prev ON listening_events(previous_event_id);
+CREATE INDEX IF NOT EXISTS idx_le_time ON listening_events(timestamp);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 const id = () =>
@@ -71,6 +113,8 @@ const id = () =>
 
 let db = null;
 let dbReady = false;
+let currentSessionId = null;
+let lastEventId = null;
 
 // ---------- Boot ----------
 
@@ -81,48 +125,28 @@ async function start() {
     let restored = false;
     const saved = localStorage.getItem('musync.db');
     if (saved) {
-  try {
-    const bytes = Uint8Array.from(atob(saved), c => c.charCodeAt(0));
-    db = new SQL.Database(bytes);
-    // Don't require newer tables to exist. Just make sure it opens.
-    db.exec('SELECT 1');
-    restored = true;
-    // Make sure newer tables get added if they're missing
-    db.run(SCHEMA);
-  } catch (e) {
-    console.warn('Saved DB corrupted. Keeping a backup before reset.', e);
-    // Save the broken one under a rescue key so it's not lost
-    try { localStorage.setItem('musync.db.broken', saved); } catch {}
-    localStorage.removeItem('musync.db');
-    db = null;
-  }
-}
+      try {
+        const bytes = Uint8Array.from(atob(saved), c => c.charCodeAt(0));
+        db = new SQL.Database(bytes);
+        db.exec('SELECT 1');
+        db.run(SCHEMA);
+        restored = true;
+      } catch (e) {
+        console.warn('Saved DB corrupted. Keeping a rescue copy.', e);
+        try { localStorage.setItem('musync.db.broken', saved); } catch {}
+        localStorage.removeItem('musync.db');
+        db = null;
+      }
+    }
 
     if (!restored) db = new SQL.Database();
-
     db.run(SCHEMA);
-
-function persist() {
-  if (!db) return;
-  try {
-    const data = db.export();
-    let s = '';
-    for (const b of data) s += String.fromCharCode(b);
-    localStorage.setItem('musync.db', btoa(s));
-
-    // Rolling local backup once per session
-    if (!sessionStorage.getItem('musync.backup.taken')) {
-      localStorage.setItem('musync.db.backup', btoa(s));
-      sessionStorage.setItem('musync.backup.taken', '1');
-    }
-  } catch (e) {
-    console.warn('Failed to persist DB:', e);
-  }
-}
 
     persist();
     dbReady = true;
     render();
+    renderKnowledge();
+    renderWeights();
     setStatus('');
   } catch (err) {
     console.error('muSync failed to start:', err);
@@ -154,7 +178,7 @@ function setStatus(msg) {
   el.style.display = msg ? 'block' : 'none';
 }
 
-// ---------- Artist helpers ----------
+// ---------- Artists ----------
 
 function upsertArtist(name) {
   const trimmed = name.trim();
@@ -224,10 +248,11 @@ function addSong(title, artistRaw) {
 
   persist();
   render();
+  renderKnowledge();
   setStatus('');
 }
 
-// ---------- Read back ----------
+// ---------- Read library ----------
 
 function listSongs() {
   const works = db.exec(`
@@ -294,9 +319,10 @@ function render() {
         <strong>${escapeHtml(s.title)}</strong>
         <span class="muted"> — ${escapeHtml(s.artist || '')}</span>
       </span>
-      <span class="actions">
+      <span style="display:flex; gap:8px; align-items:center">
+        <button class="small" data-why="${s.id}" data-title="${escapeHtml(s.title)}">Why this song?</button>
         ${s.fileId
-          ? `<button class="small" data-play="${s.fileId}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist || '')}">Play</button>`
+          ? `<button class="small" data-play="${s.fileId}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist || '')}" data-work="${s.id}">Play</button>`
           : ''}
         <button class="small" data-attach="${s.recordingId}">${s.fileId ? 'Replace' : 'Attach audio'}</button>
       </span>
@@ -310,8 +336,12 @@ function render() {
 
   list.querySelectorAll('[data-play]').forEach(btn => {
     btn.addEventListener('click', () =>
-      playFile(btn.dataset.play, btn.dataset.title, btn.dataset.artist)
+      playFile(btn.dataset.play, btn.dataset.title, btn.dataset.artist, btn.dataset.work)
     );
+  });
+
+  list.querySelectorAll('[data-why]').forEach(btn => {
+    btn.addEventListener('click', () => showWhy(btn.dataset.why, btn.dataset.title));
   });
 }
 
@@ -322,7 +352,7 @@ function escapeHtml(str) {
   }[c]));
 }
 
-// ---------- Audio attach + play ----------
+// ---------- Audio attach + play with event tracking ----------
 
 function pickAudioFor(recordingId) {
   const input = document.createElement('input');
@@ -353,35 +383,279 @@ async function attachAudio(recordingId, file) {
   render();
 }
 
-async function playFile(fileId, title, artist) {
+function ensureSession() {
+  if (currentSessionId) return currentSessionId;
+  currentSessionId = id();
+  db.run(
+    'INSERT INTO playback_sessions (id, start_time, mode) VALUES (?, ?, ?)',
+    [currentSessionId, new Date().toISOString(), 'MANUAL']
+  );
+  persist();
+  return currentSessionId;
+}
+
+function recordEvent(workId, recordingId, eventType, extra = {}) {
+  const sessionId = ensureSession();
+  const eventId = id();
+  const now = new Date().toISOString();
+  db.run(
+    `INSERT INTO listening_events
+      (id, session_id, timestamp, work_id, recording_id, mode, event_type,
+       position_ms, duration_played_ms, completion_percent, skipped_after_ms,
+       manual_selection, previous_event_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      eventId, sessionId, now, workId, recordingId || null, 'MANUAL', eventType,
+      extra.position_ms ?? null,
+      extra.duration_played_ms ?? null,
+      extra.completion_percent ?? null,
+      extra.skipped_after_ms ?? null,
+      extra.manual_selection ? 1 : 0,
+      lastEventId
+    ]
+  );
+  lastEventId = eventId;
+  persist();
+  renderKnowledge();
+}
+
+async function playFile(fileId, title, artist, workId) {
   const file = await getFile(fileId);
   if (!file) {
     setStatus('Audio file not found in local storage.');
     return;
   }
-  const url = URL.createObjectURL(file);
+
   const audio = document.getElementById('audio');
   const player = document.getElementById('player');
   document.getElementById('player-title').textContent = title || '';
   document.getElementById('player-artist').textContent = artist || '';
   player.hidden = false;
-  audio.src = url;
+
+  // Clean up previous listeners
+  audio.onloadedmetadata = null;
+  audio.onended = null;
+  audio.onseeked = null;
+
+  audio.src = URL.createObjectURL(file);
+
+  let startedAt = null;
+  let lastPosition = 0;
+
+  audio.onloadedmetadata = () => {
+    startedAt = Date.now();
+  };
+
+  audio.onseeked = () => {
+    // detect skip: user jumped forward more than 5s
+    const delta = audio.currentTime - lastPosition;
+    if (delta > 5 && startedAt) {
+      recordEvent(workId, null, 'SKIP', {
+        position_ms: Math.round(lastPosition * 1000),
+        skipped_after_ms: Math.round(lastPosition * 1000)
+      });
+    }
+    lastPosition = audio.currentTime;
+  };
+
+  audio.onended = () => {
+    const dur = audio.duration || 0;
+    recordEvent(workId, null, 'COMPLETE', {
+      position_ms: Math.round(dur * 1000),
+      duration_played_ms: Math.round(dur * 1000),
+      completion_percent: 100
+    });
+  };
+
+  // Record start
+  recordEvent(workId, null, 'START', {
+    position_ms: 0,
+    manual_selection: true
+  });
+
   audio.play();
 }
 
-// ---------- Wire up ----------
+// ---------- Why this song panel ----------
 
-document.getElementById('add').addEventListener('click', () => {
-  if (!dbReady) {
-    setStatus('Database is still loading. Try again in a second.');
-    return;
-  }
-  const title = document.getElementById('title').value;
-  const artist = document.getElementById('artist').value;
-  addSong(title, artist);
-  document.getElementById('title').value = '';
-  document.getElementById('artist').value = '';
-});
+function showWhy(workId, title) {
+  const el = document.getElementById('knowledge');
+  const events = db.exec(
+    `SELECT COUNT(*),
+            SUM(CASE WHEN event_type = 'COMPLETE' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN event_type = 'SKIP' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN manual_selection = 1 THEN 1 ELSE 0 END),
+            MAX(timestamp)
+     FROM listening_events WHERE work_id = ?`,
+    [workId]
+  );
+  const e = events.length ? events[0].values[0] : [0, 0, 0, 0, null];
+
+  const transitions = db.exec(
+    `SELECT le_prev.work_id,
+            (SELECT canonical_title FROM works WHERE id = le_prev.work_id),
+            COUNT(*)
+     FROM listening_events le
+     JOIN listening_events le_prev ON le.previous_event_id = le_prev.id
+     WHERE le.work_id = ?
+     GROUP BY le_prev.work_id
+     ORDER BY COUNT(*) DESC
+     LIMIT 5`,
+    [workId]
+  );
+
+  const trans = transitions.length ? transitions[0].values : [];
+
+  let html = `
+    <div class="knowledge-block">
+      <h3>Why this song? — ${escapeHtml(title)}</h3>
+      <div class="knowledge-row"><span class="label">Total plays</span><span class="value">${e[0] || 0}</span></div>
+      <div class="knowledge-row"><span class="label">Completed</span><span class="value">${e[1] || 0}</span></div>
+      <div class="knowledge-row"><span class="label">Skipped</span><span class="value">${e[2] || 0}</span></div>
+      <div class="knowledge-row"><span class="label">Manually chosen</span><span class="value">${e[3] || 0}</span></div>
+      <div class="knowledge-row"><span class="label">Last played</span><span class="value">${e[4] || 'never'}</span></div>
+    </div>
+    <div class="knowledge-block">
+      <h3>What usually plays before this</h3>
+      ${trans.length
+        ? trans.map(([wid, wtitle, count]) =>
+            `<div class="knowledge-row">
+              <span class="label">${escapeHtml(wtitle || 'unknown')}</span>
+              <span class="value">${count}×</span>
+            </div>`).join('')
+        : '<div class="knowledge-row"><span class="label">No transition data yet.</span></div>'}
+    </div>
+  `;
+
+  el.innerHTML = html;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ---------- Knowledge panel ----------
+
+function renderKnowledge() {
+  const el = document.getElementById('knowledge');
+  if (!el) return;
+
+  const totals = db.exec(`
+    SELECT
+      (SELECT COUNT(*) FROM works),
+      (SELECT COUNT(*) FROM listening_events),
+      (SELECT COUNT(*) FROM playback_sessions),
+      (SELECT COUNT(*) FROM listening_events WHERE event_type = 'COMPLETE'),
+      (SELECT COUNT(*) FROM listening_events WHERE event_type = 'SKIP'),
+      (SELECT COUNT(*) FROM listening_events WHERE manual_selection = 1)
+  `);
+  const t = totals.length ? totals[0].values[0] : [0, 0, 0, 0, 0, 0];
+
+  const topTransitions = db.exec(`
+    SELECT
+      (SELECT canonical_title FROM works WHERE id = le_prev.work_id) AS from_title,
+      (SELECT canonical_title FROM works WHERE id = le.work_id) AS to_title,
+      COUNT(*) AS n
+    FROM listening_events le
+    JOIN listening_events le_prev ON le.previous_event_id = le_prev.id
+    WHERE le.event_type = 'START' AND le.manual_selection = 1
+    GROUP BY le_prev.work_id, le.work_id
+    ORDER BY n DESC
+    LIMIT 10
+  `);
+
+  const transitions = topTransitions.length ? topTransitions[0].values : [];
+
+  const hours = db.exec(`
+    SELECT substr(timestamp, 12, 2) AS hour, COUNT(*)
+    FROM listening_events
+    GROUP BY hour
+    ORDER BY hour
+  `);
+  const hourRows = hours.length ? hours[0].values : [];
+
+  el.innerHTML = `
+    <div class="knowledge-block">
+      <h3>Totals</h3>
+      <div class="knowledge-row"><span class="label">Songs in library</span><span class="value">${t[0]}</span></div>
+      <div class="knowledge-row"><span class="label">Playback events recorded</span><span class="value">${t[1]}</span></div>
+      <div class="knowledge-row"><span class="label">Playback sessions</span><span class="value">${t[2]}</span></div>
+      <div class="knowledge-row"><span class="label">Completed plays</span><span class="value">${t[3]}</span></div>
+      <div class="knowledge-row"><span class="label">Skipped plays</span><span class="value">${t[4]}</span></div>
+      <div class="knowledge-row"><span class="label">Manual selections</span><span class="value">${t[5]}</span></div>
+    </div>
+
+    <div class="knowledge-block">
+      <h3>Transitions I have seen (top 10)</h3>
+      ${transitions.length
+        ? transitions.map(([from, to, n]) =>
+            `<div class="knowledge-row">
+              <span class="label">${escapeHtml(from || '?')} → ${escapeHtml(to || '?')}</span>
+              <span class="value">${n}×</span>
+            </div>`).join('')
+        : '<div class="knowledge-row"><span class="label">Nothing yet. Play some songs.</span></div>'}
+    </div>
+
+    <div class="knowledge-block">
+      <h3>When you listen</h3>
+      ${hourRows.length
+        ? hourRows.map(([hour, n]) =>
+            `<div class="knowledge-row">
+              <span class="label">${hour}:00</span>
+              <span class="value">${n} plays</span>
+            </div>`).join('')
+        : '<div class="knowledge-row"><span class="label">No listening data yet.</span></div>'}
+    </div>
+  `;
+}
+
+// ---------- Weights panel ----------
+
+function getWeights() {
+  const r = db.exec("SELECT value_json FROM settings WHERE key = 'weights'");
+  if (!r.length || !r[0].values.length) return { ...DEFAULT_WEIGHTS };
+  try { return JSON.parse(r[0].values[0][0]); }
+  catch { return { ...DEFAULT_WEIGHTS }; }
+}
+
+function saveWeights(w) {
+  db.run(
+    `INSERT INTO settings (key, value_json, updated_at)
+     VALUES ('weights', ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json,
+                                    updated_at = excluded.updated_at`,
+    [JSON.stringify(w)]
+  );
+  persist();
+}
+
+function renderWeights() {
+  const el = document.getElementById('weights');
+  if (!el) return;
+  const w = getWeights();
+
+  const rows = [
+    ['transition', 'Transition strength', 'How strongly A → B has happened in your history.'],
+    ['novelty', 'Novelty boost', 'Rewards songs you have not heard recently.'],
+    ['timeOfDay', 'Time-of-day match', 'Rewards songs you usually play at this hour.'],
+    ['skipPenalty', 'Skip penalty', 'Penalizes songs you tend to skip.']
+  ];
+
+  el.innerHTML = rows.map(([key, name, desc]) => `
+    <div class="weight-row">
+      <div>
+        <div class="name">${name}</div>
+        <div class="desc">${desc}</div>
+      </div>
+      <input type="number" min="0" max="100" step="1" data-weight="${key}" value="${w[key] ?? 0}" />
+    </div>
+  `).join('');
+}
+
+function readWeightsFromUI() {
+  const w = {};
+  document.querySelectorAll('[data-weight]').forEach(input => {
+    w[input.dataset.weight] = Number(input.value) || 0;
+  });
+  return w;
+}
 
 // ---------- Backup ----------
 
@@ -406,11 +680,13 @@ function importDatabase(file) {
       const SQL = await initSqlJs({ locateFile: () => SQL_WASM_URL });
       const bytes = new Uint8Array(reader.result);
       const next = new SQL.Database(bytes);
-      // sanity: does it have our tables?
       next.exec('SELECT 1 FROM works LIMIT 1');
+      next.run(SCHEMA);
       db = next;
       persist();
       render();
+      renderKnowledge();
+      renderWeights();
       setBackupStatus(`Imported ${file.name}`);
     } catch (e) {
       console.error(e);
@@ -425,16 +701,39 @@ function setBackupStatus(msg) {
   if (el) el.textContent = msg || '';
 }
 
+// ---------- Wire up ----------
+
+document.getElementById('add').addEventListener('click', () => {
+  if (!dbReady) {
+    setStatus('Database is still loading. Try again in a second.');
+    return;
+  }
+  const title = document.getElementById('title').value;
+  const artist = document.getElementById('artist').value;
+  addSong(title, artist);
+  document.getElementById('title').value = '';
+  document.getElementById('artist').value = '';
+});
+
+document.getElementById('refresh-knowledge').addEventListener('click', renderKnowledge);
+
+document.getElementById('save-weights').addEventListener('click', () => {
+  const w = readWeightsFromUI();
+  saveWeights(w);
+  document.getElementById('weights-status').textContent = 'Saved.';
+  setTimeout(() => {
+    document.getElementById('weights-status').textContent = '';
+  }, 2000);
+});
+
+document.getElementById('reset-weights').addEventListener('click', () => {
+  saveWeights({ ...DEFAULT_WEIGHTS });
+  renderWeights();
+  document.getElementById('weights-status').textContent = 'Reset to defaults.';
+  setTimeout(() => {
+    document.getElementById('weights-status').textContent = '';
+  }, 2000);
+});
+
 document.getElementById('export-db').addEventListener('click', exportDatabase);
-
-document.getElementById('import-db').addEventListener('click', () => {
-  document.getElementById('import-file').click();
-});
-
-document.getElementById('import-file').addEventListener('change', (e) => {
-  const f = e.target.files?.[0];
-  if (f) importDatabase(f);
-  e.target.value = '';
-});
-
-start();
+document.getElementById('import-db').addEventListener('
