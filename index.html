@@ -15,7 +15,7 @@
     <section class="panel">
       <h2>Add a song</h2>
       <input id="title" placeholder="Song title" />
-      <input id="artist" placeholder="Artist" />
+      <input id="artist" placeholder="Artist ; Artist ; Artist" />
       <button id="add">Add</button>
     </section>
 
@@ -25,25 +25,50 @@
       <p id="empty" class="muted">No songs yet.</p>
     </section>
 
-<section class="panel">
-  <h2>Backup</h2>
-  <p class="muted" style="margin-top:0">Save your library as a file, or restore from one.</p>
-  <div style="display:flex; gap:8px; flex-wrap:wrap">
-    <button id="export-db">Download library</button>
-    <button id="import-db">Upload library</button>
-    <input id="import-file" type="file" accept=".db,.sqlite,application/octet-stream" hidden />
-  </div>
-  <p id="backup-status" class="muted" style="margin-bottom:0"></p>
-</section>    
+    <section class="panel">
+      <h2>What I know about you</h2>
+      <p class="muted" style="margin-top:0">
+        Every fact the algorithm has about your listening. Nothing is hidden.
+      </p>
+      <div id="knowledge" class="knowledge"></div>
+      <div style="margin-top:12px">
+        <button id="refresh-knowledge" class="small">Refresh</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Algorithm settings</h2>
+      <p class="muted" style="margin-top:0">
+        These weights control how Smart Shuffle will choose songs.
+        You can see exactly what each one does.
+      </p>
+      <div id="weights" class="weights"></div>
+      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
+        <button id="save-weights">Save weights</button>
+        <button id="reset-weights" class="small">Reset to defaults</button>
+      </div>
+      <p id="weights-status" class="muted" style="margin-bottom:0"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Backup</h2>
+      <p class="muted" style="margin-top:0">Save your library as a file, or restore from one.</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <button id="export-db">Download library</button>
+        <button id="import-db">Upload library</button>
+        <input id="import-file" type="file" accept=".db,.sqlite,application/octet-stream" hidden />
+      </div>
+      <p id="backup-status" class="muted" style="margin-bottom:0"></p>
+    </section>
   </main>
 
-<footer id="player" class="player" hidden>
-  <div class="player-info">
-    <div id="player-title" class="player-title">—</div>
-    <div id="player-artist" class="player-artist muted"></div>
-  </div>
-  <audio id="audio" controls preload="metadata"></audio>
-</footer>
+  <footer id="player" class="player" hidden>
+    <div class="player-info">
+      <div id="player-title" class="player-title">—</div>
+      <div id="player-artist" class="player-artist muted"></div>
+    </div>
+    <audio id="audio" controls preload="metadata"></audio>
+  </footer>
 
   <script type="module" src="./src/main.js"></script>
 </body>
