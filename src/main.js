@@ -116,6 +116,8 @@ let dbReady = false;
 let currentSessionId = null;
 let lastEventId = null;
 let editingWorkId = null;
+let searchQuery = '';
+let sortMode = 'added-desc';
 
 async function start() {
   try {
@@ -348,9 +350,13 @@ async function detachAudio(recordingId) {
   render();
 }
 
+// ---------- Read library ----------
+
 function listSongs() {
   const works = db.exec(`
-    SELECT w.id, w.canonical_title,
+    SELECT w.id,
+           w.canonical_title,
+           w.created_at,
            (SELECT r.id FROM recordings r WHERE r.work_id = w.id LIMIT 1) AS rec_id
     FROM works w
     JOIN playlist_entries pe ON pe.work_id = w.id
@@ -359,7 +365,8 @@ function listSongs() {
 
   if (!works.length) return [];
 
-  return works[0].values.map(([workId, title, recId]) => {
+  const seenTitles = new Map();
+  const rows = works[0].values.map(([workId, title, createdAt, recId]) => {
     const credits = db.exec(
       `SELECT c.role, a.name
        FROM credits c
@@ -368,9 +375,9 @@ function listSongs() {
        ORDER BY c.order_index`,
       [workId]
     );
-    const rows = credits.length ? credits[0].values : [];
-    const main = rows.filter(r => r[0] === 'MAIN').map(r => r[1]);
-    const feat = rows.filter(r => r[0] === 'FEATURED').map(r => r[1]);
+    const creditRows = credits.length ? credits[0].values : [];
+    const main = creditRows.filter(r => r[0] === 'MAIN').map(r => r[1]);
+    const feat = creditRows.filter(r => r[0] === 'FEATURED').map(r => r[1]);
 
     let artistLabel = '';
     if (main.length) artistLabel = main.join(', ');
@@ -390,28 +397,87 @@ function listSongs() {
     );
     const mediaRow = media.length && media[0].values.length ? media[0].values[0] : null;
 
+    const key = (title || '').trim().toLowerCase();
+    seenTitles.set(key, (seenTitles.get(key) || 0) + 1);
+
     return {
       id: workId,
       recordingId: recId,
       title,
       artist: artistLabel,
       rawArtist,
+      createdAt,
       fileId: mediaRow ? mediaRow[0] : null,
-      filename: mediaRow ? mediaRow[1] : null
+      filename: mediaRow ? mediaRow[1] : null,
+      dupKey: key
     };
   });
+
+  for (const row of rows) {
+    row.dupCount = seenTitles.get(row.dupKey) || 1;
+  }
+
+  return rows;
+}
+
+function filterAndSort(rows) {
+  const q = searchQuery.trim().toLowerCase();
+
+  let filtered = rows;
+  if (q) {
+    filtered = rows.filter(r =>
+      (r.title || '').toLowerCase().includes(q) ||
+      (r.artist || '').toLowerCase().includes(q)
+    );
+  }
+
+  const sorted = filtered.slice();
+
+  switch (sortMode) {
+    case 'added-asc':
+      sorted.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+      break;
+    case 'added-desc':
+      sorted.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      break;
+    case 'title-asc':
+      sorted.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+      break;
+    case 'title-desc':
+      sorted.sort((a, b) => (b.title || '').localeCompare(a.title || ''));
+      break;
+    case 'artist-asc':
+      sorted.sort((a, b) => (a.artist || '').localeCompare(b.artist || ''));
+      break;
+    case 'artist-desc':
+      sorted.sort((a, b) => (b.artist || '').localeCompare(a.artist || ''));
+      break;
+  }
+
+  return sorted;
 }
 
 function render() {
   if (!dbReady) return;
   const list = document.getElementById('list');
   const empty = document.getElementById('empty');
-  const songs = listSongs();
+  const summary = document.getElementById('library-summary');
+
+  const all = listSongs();
+  const visible = filterAndSort(all);
 
   list.innerHTML = '';
-  empty.style.display = songs.length ? 'none' : 'block';
+  empty.style.display = visible.length ? 'none' : 'block';
 
-  for (const s of songs) {
+  if (all.length === 0) {
+    summary.textContent = '';
+  } else if (visible.length === all.length) {
+    summary.textContent = `${all.length} song${all.length === 1 ? '' : 's'}`;
+  } else {
+    summary.textContent = `${visible.length} of ${all.length} songs`;
+  }
+
+  for (const s of visible) {
     const li = document.createElement('li');
 
     if (editingWorkId === s.id) {
@@ -437,9 +503,13 @@ function render() {
       continue;
     }
 
+    const dupBadge = s.dupCount > 1
+      ? `<span class="dup-badge">dup ×${s.dupCount}</span>`
+      : '';
+
     li.innerHTML = `
       <span>
-        <strong>${escapeHtml(s.title)}</strong>
+        <strong>${escapeHtml(s.title)}</strong>${dupBadge}
         <span class="muted"> — ${escapeHtml(s.artist || '')}</span>
       </span>
       <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap">
@@ -495,6 +565,8 @@ function escapeHtml(str) {
 function escapeAttr(str) {
   return String(str).replace(/"/g, '&quot;');
 }
+
+// ---------- Audio ----------
 
 function pickAudioFor(recordingId) {
   const input = document.createElement('input');
@@ -630,6 +702,8 @@ async function playFile(fileId, title, artist, workId) {
   audio.play();
 }
 
+// ---------- Why this song ----------
+
 function showWhy(workId, title) {
   const el = document.getElementById('knowledge');
   const events = db.exec(
@@ -682,6 +756,8 @@ function showWhy(workId, title) {
   el.innerHTML = html;
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+// ---------- Knowledge panel ----------
 
 function renderKnowledge() {
   const el = document.getElementById('knowledge');
@@ -756,6 +832,8 @@ function renderKnowledge() {
   `;
 }
 
+// ---------- Weights ----------
+
 function getWeights() {
   const r = db.exec("SELECT value_json FROM settings WHERE key = 'weights'");
   if (!r.length || !r[0].values.length) return { ...DEFAULT_WEIGHTS };
@@ -805,6 +883,8 @@ function readWeightsFromUI() {
   return w;
 }
 
+// ---------- Backup ----------
+
 function exportDatabase() {
   if (!db) return;
   const data = db.export();
@@ -846,6 +926,8 @@ function setBackupStatus(msg) {
   const el = document.getElementById('backup-status');
   if (el) el.textContent = msg || '';
 }
+
+// ---------- CSV import ----------
 
 function parseCSV(text) {
   const rows = [];
@@ -990,6 +1072,8 @@ function setCsvStatus(msg) {
   if (el) el.textContent = msg || '';
 }
 
+// ---------- Wire up ----------
+
 document.getElementById('add').addEventListener('click', () => {
   if (!dbReady) {
     setStatus('Database is still loading. Try again in a second.');
@@ -1000,6 +1084,16 @@ document.getElementById('add').addEventListener('click', () => {
   addSong(title, artist);
   document.getElementById('title').value = '';
   document.getElementById('artist').value = '';
+});
+
+document.getElementById('search').addEventListener('input', (e) => {
+  searchQuery = e.target.value;
+  render();
+});
+
+document.getElementById('sort').addEventListener('change', (e) => {
+  sortMode = e.target.value;
+  render();
 });
 
 document.getElementById('refresh-knowledge').addEventListener('click', renderKnowledge);
