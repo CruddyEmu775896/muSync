@@ -973,6 +973,85 @@ function importCSV(file) {
       const { titleIdx, artistIdx } = findColumns(header);
 
       if (titleIdx === -1) {
+        setCsvStatus('Could not find a title column.');
+        return;
+      }
+      if (artistIdx === -1) {
+        setCsvStatus('Could not find an artist column.');
+        return;
+      }
+
+      // Dedupe within this import by (title + artist), case-sensitive
+      const seen = new Set();
+
+      let added = 0;
+      let skippedEmpty = 0;
+      let skippedUndefined = 0;
+      let skippedDuplicate = 0;
+      let skippedPodcast = 0;
+
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        const rawTitle = (row[titleIdx] ?? '').toString().trim();
+        const rawArtist = (row[artistIdx] ?? '').toString().trim();
+
+        // Skip podcast episodes: first column starts with "spotify:episode:"
+        const firstCol = (row[0] ?? '').toString();
+        if (firstCol.startsWith('spotify:episode:')) {
+          skippedPodcast++;
+          continue;
+        }
+
+        // Skip empty titles
+        if (!rawTitle) {
+          skippedEmpty++;
+          continue;
+        }
+
+        // Skip merged-file artifacts
+        if (rawTitle.toLowerCase() === 'undefined') {
+          skippedUndefined++;
+          continue;
+        }
+
+        // Skip duplicates within this import
+        const key = `${rawTitle}|||${rawArtist}`;
+        if (seen.has(key)) {
+          skippedDuplicate++;
+          continue;
+        }
+        seen.add(key);
+
+        // Strip a trailing "undefined" from the artist field if present
+        const cleanedArtist =
+          rawArtist.toLowerCase() === 'undefined' ? '' : rawArtist;
+
+        addSongInternal(rawTitle, cleanedArtist);
+        added++;
+      }
+
+      persist();
+      render();
+      renderKnowledge();
+
+      const parts = [`Imported ${added} song${added === 1 ? '' : 's'}`];
+      if (skippedDuplicate) parts.push(`${skippedDuplicate} duplicates skipped`);
+      if (skippedEmpty) parts.push(`${skippedEmpty} empty titles`);
+      if (skippedUndefined) parts.push(`${skippedUndefined} undefined`);
+      if (skippedPodcast) parts.push(`${skippedPodcast} podcast episodes skipped`);
+
+      setCsvStatus(parts.join(' · ') + '.');
+    } catch (e) {
+      console.error(e);
+      setCsvStatus('Failed to parse CSV. Check the console for details.');
+    }
+  };
+  reader.readAsText(file);
+}
+      const header = rows[0];
+      const { titleIdx, artistIdx } = findColumns(header);
+
+      if (titleIdx === -1) {
         setCsvStatus('Could not find a title column. Header must contain "title".');
         return;
       }
