@@ -1,6 +1,3 @@
-**File:** `src/main.js`
-
-```js
 import './style.css';
 import '../public/manifest.webmanifest';
 import initSqlJs from 'sql.js';
@@ -120,8 +117,6 @@ let currentSessionId = null;
 let lastEventId = null;
 let editingWorkId = null;
 
-// ---------- Boot ----------
-
 async function start() {
   try {
     const SQL = await initSqlJs({ locateFile: () => SQL_WASM_URL });
@@ -182,8 +177,6 @@ function setStatus(msg) {
   el.style.display = msg ? 'block' : 'none';
 }
 
-// ---------- Artists ----------
-
 function upsertArtist(name) {
   const trimmed = name.trim();
   if (!trimmed) return null;
@@ -203,8 +196,6 @@ function parseArtistString(raw) {
     order: i
   }));
 }
-
-// ---------- Add song ----------
 
 function addSong(title, artistRaw) {
   const cleanTitle = (title || '').trim();
@@ -255,8 +246,6 @@ function addSongInternal(cleanTitle, artistRaw) {
 
   return workId;
 }
-
-// ---------- Edit song ----------
 
 function startEdit(workId) {
   editingWorkId = workId;
@@ -311,8 +300,6 @@ function saveEdit(workId, newTitle, newArtist) {
   setStatus('');
 }
 
-// ---------- Delete song ----------
-
 async function deleteSong(workId) {
   const work = db.exec('SELECT canonical_title FROM works WHERE id = ?', [workId]);
   const title = work.length && work[0].values.length ? work[0].values[0][0] : 'this song';
@@ -341,8 +328,6 @@ async function deleteSong(workId) {
   renderKnowledge();
 }
 
-// ---------- Detach audio ----------
-
 async function detachAudio(recordingId) {
   const rows = db.exec(
     `SELECT m.id, m.local_file_id
@@ -362,8 +347,6 @@ async function detachAudio(recordingId) {
   persist();
   render();
 }
-
-// ---------- Read library ----------
 
 function listSongs() {
   const works = db.exec(`
@@ -513,8 +496,6 @@ function escapeAttr(str) {
   return String(str).replace(/"/g, '&quot;');
 }
 
-// ---------- Audio attach + play ----------
-
 function pickAudioFor(recordingId) {
   const input = document.createElement('input');
   input.type = 'file';
@@ -649,8 +630,6 @@ async function playFile(fileId, title, artist, workId) {
   audio.play();
 }
 
-// ---------- Why this song panel ----------
-
 function showWhy(workId, title) {
   const el = document.getElementById('knowledge');
   const events = db.exec(
@@ -703,8 +682,6 @@ function showWhy(workId, title) {
   el.innerHTML = html;
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
-
-// ---------- Knowledge panel ----------
 
 function renderKnowledge() {
   const el = document.getElementById('knowledge');
@@ -779,8 +756,6 @@ function renderKnowledge() {
   `;
 }
 
-// ---------- Weights panel ----------
-
 function getWeights() {
   const r = db.exec("SELECT value_json FROM settings WHERE key = 'weights'");
   if (!r.length || !r[0].values.length) return { ...DEFAULT_WEIGHTS };
@@ -830,8 +805,6 @@ function readWeightsFromUI() {
   return w;
 }
 
-// ---------- Backup ----------
-
 function exportDatabase() {
   if (!db) return;
   const data = db.export();
@@ -873,8 +846,6 @@ function setBackupStatus(msg) {
   const el = document.getElementById('backup-status');
   if (el) el.textContent = msg || '';
 }
-
-// ---------- CSV import ----------
 
 function parseCSV(text) {
   const rows = [];
@@ -939,24 +910,19 @@ function parseCSV(text) {
 }
 
 function findColumns(headerRow) {
-  const titleIdx = headerRow.findIndex(h =>
-    h.trim().toLowerCase().includes('track name')
-  );
-  const artistIdx = headerRow.findIndex(h =>
-    h.trim().toLowerCase().includes('artist name')
-  );
+  const normalized = headerRow.map(h => h.trim().toLowerCase());
 
-  const titleFallback = titleIdx === -1
-    ? headerRow.findIndex(h => h.trim().toLowerCase() === 'title')
-    : titleIdx;
-  const artistFallback = artistIdx === -1
-    ? headerRow.findIndex(h => h.trim().toLowerCase() === 'artist')
-    : artistIdx;
+  let titleIdx = normalized.findIndex(h => h === 'track name');
+  if (titleIdx === -1) titleIdx = normalized.findIndex(h => h === 'title');
+  if (titleIdx === -1) titleIdx = normalized.findIndex(h => h.includes('track name'));
+  if (titleIdx === -1) titleIdx = normalized.findIndex(h => h.includes('title'));
 
-  return {
-    titleIdx: titleFallback,
-    artistIdx: artistFallback
-  };
+  let artistIdx = normalized.findIndex(h => h === 'artist name(s)');
+  if (artistIdx === -1) artistIdx = normalized.findIndex(h => h === 'artist name');
+  if (artistIdx === -1) artistIdx = normalized.findIndex(h => h === 'artist');
+  if (artistIdx === -1) artistIdx = normalized.findIndex(h => h.includes('artist'));
+
+  return { titleIdx, artistIdx };
 }
 
 function importCSV(file) {
@@ -975,7 +941,7 @@ function importCSV(file) {
       const { titleIdx, artistIdx } = findColumns(header);
 
       if (titleIdx === -1) {
-        setCsvStatus('Could not find a track/title column.');
+        setCsvStatus('Could not find a title/track name column.');
         return;
       }
       if (artistIdx === -1) {
@@ -1023,8 +989,6 @@ function setCsvStatus(msg) {
   const el = document.getElementById('csv-status');
   if (el) el.textContent = msg || '';
 }
-
-// ---------- Wire up ----------
 
 document.getElementById('add').addEventListener('click', () => {
   if (!dbReady) {
@@ -1079,4 +1043,3 @@ document.getElementById('import-csv-file').addEventListener('change', (e) => {
 });
 
 start();
-```
