@@ -939,12 +939,21 @@ function parseCSV(text) {
 }
 
 function findColumns(headerRow) {
-  const titleIdx = headerRow.findIndex(h =>
-    h.trim().toLowerCase().includes('title')
+  const normalized = headerRow.map(h => h.trim().toLowerCase());
+
+  // Title: accept "title", "track name", "song", "name"
+  const titleIdx = normalized.findIndex(h =>
+    h.includes('title') ||
+    h.includes('track name') ||
+    h === 'song' ||
+    h === 'name'
   );
-  const artistIdx = headerRow.findIndex(h =>
-    h.trim().toLowerCase().includes('artist')
+
+  // Artist: accept "artist", "artists", "artist name(s)", "artist name"
+  const artistIdx = normalized.findIndex(h =>
+    h.includes('artist')
   );
+
   return { titleIdx, artistIdx };
 }
 
