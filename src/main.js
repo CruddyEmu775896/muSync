@@ -209,7 +209,10 @@ function addSong(title, artistRaw) {
     setStatus('Please enter a song title.');
     return;
   }
+  addSongInternal(cleanTitle, artistRaw);
+}
 
+function addSongInternal(cleanTitle, artistRaw) {
   const parsed = parseArtistString(artistRaw);
   const displayCredit = parsed.length ? parsed.map(p => p.name).join('; ') : null;
 
@@ -247,10 +250,7 @@ function addSong(title, artistRaw) {
     [entryId, pos, 'WORK', workId]
   );
 
-  persist();
-  render();
-  renderKnowledge();
-  setStatus('');
+  return workId;
 }
 
 // ---------- Edit song ----------
@@ -275,13 +275,11 @@ function saveEdit(workId, newTitle, newArtist) {
   const parsed = parseArtistString(newArtist);
   const displayCredit = parsed.length ? parsed.map(p => p.name).join('; ') : null;
 
-  // Update work
   db.run(
     'UPDATE works SET canonical_title = ?, original_artist_credit = ? WHERE id = ?',
     [cleanTitle, displayCredit, workId]
   );
 
-  // Update first recording's title
   const rec = db.exec(
     'SELECT id FROM recordings WHERE work_id = ? LIMIT 1',
     [workId]
@@ -290,7 +288,6 @@ function saveEdit(workId, newTitle, newArtist) {
     db.run('UPDATE recordings SET title = ? WHERE id = ?', [cleanTitle, rec[0].values[0][0]]);
   }
 
-  // Clear and rebuild credits for this work
   db.run("DELETE FROM credits WHERE work_id = ? AND target_type = 'WORK'", [workId]);
 
   for (const p of parsed) {
@@ -321,7 +318,6 @@ async function deleteSong(workId) {
     return;
   }
 
-  // Find local files to remove from IndexedDB
   const files = db.exec(
     `SELECT lf.id FROM local_files lf
      JOIN media m ON m.local_file_id = lf.id
@@ -331,10 +327,8 @@ async function deleteSong(workId) {
   );
   const fileIds = files.length ? files[0].values.map(v => v[0]) : [];
 
-  // Cascade handles credits, media, recordings, playlist_entries, listening_events
   db.run('DELETE FROM works WHERE id = ?', [workId]);
 
-  // Remove the audio blobs from IndexedDB
   for (const fid of fileIds) {
     try { await deleteFile(fid); } catch {}
   }
@@ -516,7 +510,7 @@ function escapeAttr(str) {
   return String(str).replace(/"/g, '&quot;');
 }
 
-// ---------- Audio attach + play with event tracking ----------
+// ---------- Audio attach + play ----------
 
 function pickAudioFor(recordingId) {
   const input = document.createElement('input');
@@ -539,7 +533,6 @@ async function attachAudio(recordingId, file) {
     [fileId, file.name, file.size, file.type || null]
   );
 
-  // Remove any existing media for this recording first
   const existing = db.exec(
     'SELECT id, local_file_id FROM media WHERE recording_id = ?',
     [recordingId]
@@ -842,84 +835,4 @@ function exportDatabase() {
   const blob = new Blob([data], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  a.href = url;
-  a.download = `musync-${stamp}.db`;
-  a.click();
-  URL.revokeObjectURL(url);
-  setBackupStatus(`Downloaded ${a.download}`);
-}
-
-function importDatabase(file) {
-  const reader = new FileReader();
-  reader.onload = async () => {
-    try {
-      const SQL = await initSqlJs({ locateFile: () => SQL_WASM_URL });
-      const bytes = new Uint8Array(reader.result);
-      const next = new SQL.Database(bytes);
-      next.exec('SELECT 1 FROM works LIMIT 1');
-      next.run(SCHEMA);
-      db = next;
-      persist();
-      render();
-      renderKnowledge();
-      renderWeights();
-      setBackupStatus(`Imported ${file.name}`);
-    } catch (e) {
-      console.error(e);
-      setBackupStatus('That file does not look like a muSync library.');
-    }
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-function setBackupStatus(msg) {
-  const el = document.getElementById('backup-status');
-  if (el) el.textContent = msg || '';
-}
-
-// ---------- Wire up ----------
-
-document.getElementById('add').addEventListener('click', () => {
-  if (!dbReady) {
-    setStatus('Database is still loading. Try again in a second.');
-    return;
-  }
-  const title = document.getElementById('title').value;
-  const artist = document.getElementById('artist').value;
-  addSong(title, artist);
-  document.getElementById('title').value = '';
-  document.getElementById('artist').value = '';
-});
-
-document.getElementById('refresh-knowledge').addEventListener('click', renderKnowledge);
-
-document.getElementById('save-weights').addEventListener('click', () => {
-  const w = readWeightsFromUI();
-  saveWeights(w);
-  document.getElementById('weights-status').textContent = 'Saved.';
-  setTimeout(() => {
-    document.getElementById('weights-status').textContent = '';
-  }, 2000);
-});
-
-document.getElementById('reset-weights').addEventListener('click', () => {
-  saveWeights({ ...DEFAULT_WEIGHTS });
-  renderWeights();
-  document.getElementById('weights-status').textContent = 'Reset to defaults.';
-  setTimeout(() => {
-    document.getElementById('weights-status').textContent = '';
-  }, 2000);
-});
-
-document.getElementById('export-db').addEventListener('click', exportDatabase);
-document.getElementById('import-db').addEventListener('click', () => {
-  document.getElementById('import-file').click();
-});
-document.getElementById('import-file').addEventListener('change', (e) => {
-  const f = e.target.files?.[0];
-  if (f) importDatabase(f);
-  e.target.value = '';
-});
-
-start();
+  const stamp =
