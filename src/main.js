@@ -2,7 +2,7 @@ import './style.css';
 import '../public/manifest.webmanifest';
 import initSqlJs from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
-import { saveFile, getFile } from './idb.js';
+import { saveFile, getFile, deleteFile } from './idb.js';
 
 const SQL_WASM_URL = wasmUrl;
 
@@ -115,6 +115,7 @@ let db = null;
 let dbReady = false;
 let currentSessionId = null;
 let lastEventId = null;
+let editingWorkId = null;
 
 // ---------- Boot ----------
 
@@ -252,6 +253,119 @@ function addSong(title, artistRaw) {
   setStatus('');
 }
 
+// ---------- Edit song ----------
+
+function startEdit(workId) {
+  editingWorkId = workId;
+  render();
+}
+
+function cancelEdit() {
+  editingWorkId = null;
+  render();
+}
+
+function saveEdit(workId, newTitle, newArtist) {
+  const cleanTitle = (newTitle || '').trim();
+  if (!cleanTitle) {
+    setStatus('Title cannot be empty.');
+    return;
+  }
+
+  const parsed = parseArtistString(newArtist);
+  const displayCredit = parsed.length ? parsed.map(p => p.name).join('; ') : null;
+
+  // Update work
+  db.run(
+    'UPDATE works SET canonical_title = ?, original_artist_credit = ? WHERE id = ?',
+    [cleanTitle, displayCredit, workId]
+  );
+
+  // Update first recording's title
+  const rec = db.exec(
+    'SELECT id FROM recordings WHERE work_id = ? LIMIT 1',
+    [workId]
+  );
+  if (rec.length && rec[0].values.length) {
+    db.run('UPDATE recordings SET title = ? WHERE id = ?', [cleanTitle, rec[0].values[0][0]]);
+  }
+
+  // Clear and rebuild credits for this work
+  db.run("DELETE FROM credits WHERE work_id = ? AND target_type = 'WORK'", [workId]);
+
+  for (const p of parsed) {
+    const artistId = upsertArtist(p.name);
+    if (!artistId) continue;
+    db.run(
+      `INSERT INTO credits
+        (id, artist_id, target_type, work_id, role, order_index)
+       VALUES (?, ?, 'WORK', ?, ?, ?)`,
+      [id(), artistId, workId, p.role, p.order]
+    );
+  }
+
+  editingWorkId = null;
+  persist();
+  render();
+  renderKnowledge();
+  setStatus('');
+}
+
+// ---------- Delete song ----------
+
+async function deleteSong(workId) {
+  const work = db.exec('SELECT canonical_title FROM works WHERE id = ?', [workId]);
+  const title = work.length && work[0].values.length ? work[0].values[0][0] : 'this song';
+
+  if (!confirm(`Delete "${title}"?\n\nThis removes the song, its artists, its audio link, and its listening history. It cannot be undone.`)) {
+    return;
+  }
+
+  // Find local files to remove from IndexedDB
+  const files = db.exec(
+    `SELECT lf.id FROM local_files lf
+     JOIN media m ON m.local_file_id = lf.id
+     JOIN recordings r ON r.id = m.recording_id
+     WHERE r.work_id = ?`,
+    [workId]
+  );
+  const fileIds = files.length ? files[0].values.map(v => v[0]) : [];
+
+  // Cascade handles credits, media, recordings, playlist_entries, listening_events
+  db.run('DELETE FROM works WHERE id = ?', [workId]);
+
+  // Remove the audio blobs from IndexedDB
+  for (const fid of fileIds) {
+    try { await deleteFile(fid); } catch {}
+  }
+
+  persist();
+  render();
+  renderKnowledge();
+}
+
+// ---------- Detach audio ----------
+
+async function detachAudio(recordingId) {
+  const rows = db.exec(
+    `SELECT m.id, m.local_file_id
+     FROM media m
+     WHERE m.recording_id = ? AND m.local_file_id IS NOT NULL`,
+    [recordingId]
+  );
+  if (!rows.length || !rows[0].values.length) return;
+
+  const [mediaId, fileId] = rows[0].values[0];
+
+  db.run('DELETE FROM media WHERE id = ?', [mediaId]);
+  db.run('DELETE FROM local_files WHERE id = ?', [fileId]);
+
+  try { await deleteFile(fileId); } catch {}
+
+  persist();
+  render();
+}
+
 // ---------- Read library ----------
 
 function listSongs() {
@@ -282,6 +396,10 @@ function listSongs() {
     if (main.length) artistLabel = main.join(', ');
     if (feat.length) artistLabel += (artistLabel ? ' ' : '') + `feat. ${feat.join(', ')}`;
 
+    let rawArtist = '';
+    if (main.length) rawArtist = main.join('; ');
+    if (feat.length) rawArtist += (rawArtist ? '; ' : '') + feat.join('; ');
+
     const media = db.exec(
       `SELECT lf.id, lf.filename
        FROM media m
@@ -297,6 +415,7 @@ function listSongs() {
       recordingId: recId,
       title,
       artist: artistLabel,
+      rawArtist,
       fileId: mediaRow ? mediaRow[0] : null,
       filename: mediaRow ? mediaRow[1] : null
     };
@@ -314,17 +433,46 @@ function render() {
 
   for (const s of songs) {
     const li = document.createElement('li');
+
+    if (editingWorkId === s.id) {
+      li.innerHTML = `
+        <div style="flex:1; display:grid; gap:6px">
+          <input id="edit-title-${s.id}" value="${escapeAttr(s.title)}" placeholder="Title" />
+          <input id="edit-artist-${s.id}" value="${escapeAttr(s.rawArtist)}" placeholder="Artist ; Artist" />
+        </div>
+        <div style="display:flex; gap:6px; align-items:flex-start">
+          <button class="small" data-save="${s.id}">Save</button>
+          <button class="small" data-cancel="1">Cancel</button>
+        </div>
+      `;
+      list.appendChild(li);
+
+      li.querySelector(`[data-save="${s.id}"]`).addEventListener('click', () => {
+        const newTitle = document.getElementById(`edit-title-${s.id}`).value;
+        const newArtist = document.getElementById(`edit-artist-${s.id}`).value;
+        saveEdit(s.id, newTitle, newArtist);
+      });
+      li.querySelector('[data-cancel]').addEventListener('click', cancelEdit);
+
+      continue;
+    }
+
     li.innerHTML = `
       <span>
         <strong>${escapeHtml(s.title)}</strong>
         <span class="muted"> — ${escapeHtml(s.artist || '')}</span>
       </span>
-      <span style="display:flex; gap:8px; align-items:center">
-        <button class="small" data-why="${s.id}" data-title="${escapeHtml(s.title)}">Why this song?</button>
+      <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap">
+        <button class="small" data-why="${s.id}" data-title="${escapeAttr(s.title)}">Why</button>
+        <button class="small" data-edit="${s.id}">Edit</button>
         ${s.fileId
-          ? `<button class="small" data-play="${s.fileId}" data-title="${escapeHtml(s.title)}" data-artist="${escapeHtml(s.artist || '')}" data-work="${s.id}">Play</button>`
+          ? `<button class="small" data-play="${s.fileId}" data-title="${escapeAttr(s.title)}" data-artist="${escapeAttr(s.artist || '')}" data-work="${s.id}">Play</button>`
           : ''}
-        <button class="small" data-attach="${s.recordingId}">${s.fileId ? 'Replace' : 'Attach audio'}</button>
+        <button class="small" data-attach="${s.recordingId}">${s.fileId ? 'Replace' : 'Attach'}</button>
+        ${s.fileId
+          ? `<button class="small" data-detach="${s.recordingId}">Detach</button>`
+          : ''}
+        <button class="small" data-delete="${s.id}">Delete</button>
       </span>
     `;
     list.appendChild(li);
@@ -343,6 +491,18 @@ function render() {
   list.querySelectorAll('[data-why]').forEach(btn => {
     btn.addEventListener('click', () => showWhy(btn.dataset.why, btn.dataset.title));
   });
+
+  list.querySelectorAll('[data-edit]').forEach(btn => {
+    btn.addEventListener('click', () => startEdit(btn.dataset.edit));
+  });
+
+  list.querySelectorAll('[data-delete]').forEach(btn => {
+    btn.addEventListener('click', () => deleteSong(btn.dataset.delete));
+  });
+
+  list.querySelectorAll('[data-detach]').forEach(btn => {
+    btn.addEventListener('click', () => detachAudio(btn.dataset.detach));
+  });
 }
 
 function escapeHtml(str) {
@@ -350,6 +510,10 @@ function escapeHtml(str) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;',
     '"': '&quot;', "'": '&#39;'
   }[c]));
+}
+
+function escapeAttr(str) {
+  return String(str).replace(/"/g, '&quot;');
 }
 
 // ---------- Audio attach + play with event tracking ----------
@@ -374,6 +538,22 @@ async function attachAudio(recordingId, file) {
     'INSERT INTO local_files (id, filename, size_bytes, format) VALUES (?, ?, ?, ?)',
     [fileId, file.name, file.size, file.type || null]
   );
+
+  // Remove any existing media for this recording first
+  const existing = db.exec(
+    'SELECT id, local_file_id FROM media WHERE recording_id = ?',
+    [recordingId]
+  );
+  if (existing.length) {
+    for (const [mid, oldFileId] of existing[0].values) {
+      db.run('DELETE FROM media WHERE id = ?', [mid]);
+      if (oldFileId) {
+        db.run('DELETE FROM local_files WHERE id = ?', [oldFileId]);
+        try { await deleteFile(oldFileId); } catch {}
+      }
+    }
+  }
+
   db.run(
     'INSERT INTO media (id, recording_id, media_type, local_file_id) VALUES (?, ?, ?, ?)',
     [id(), recordingId, 'AUDIO', fileId]
@@ -432,7 +612,6 @@ async function playFile(fileId, title, artist, workId) {
   document.getElementById('player-artist').textContent = artist || '';
   player.hidden = false;
 
-  // Clean up previous listeners
   audio.onloadedmetadata = null;
   audio.onended = null;
   audio.onseeked = null;
@@ -447,7 +626,6 @@ async function playFile(fileId, title, artist, workId) {
   };
 
   audio.onseeked = () => {
-    // detect skip: user jumped forward more than 5s
     const delta = audio.currentTime - lastPosition;
     if (delta > 5 && startedAt) {
       recordEvent(workId, null, 'SKIP', {
@@ -467,7 +645,6 @@ async function playFile(fileId, title, artist, workId) {
     });
   };
 
-  // Record start
   recordEvent(workId, null, 'START', {
     position_ms: 0,
     manual_selection: true
