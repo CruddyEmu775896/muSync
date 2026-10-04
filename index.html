@@ -21,6 +21,18 @@
 
     <section class="panel">
       <h2>Library</h2>
+      <div class="library-controls">
+        <input id="search" placeholder="Search title, artist..." />
+        <select id="sort">
+          <option value="added-desc">Date added (newest)</option>
+          <option value="added-asc">Date added (oldest)</option>
+          <option value="title-asc">Title A → Z</option>
+          <option value="title-desc">Title Z → A</option>
+          <option value="artist-asc">Artist A → Z</option>
+          <option value="artist-desc">Artist Z → A</option>
+        </select>
+      </div>
+      <p id="library-summary" class="muted" style="margin: 8px 0 0"></p>
       <ul id="list"></ul>
       <p id="empty" class="muted">No songs yet.</p>
     </section>
