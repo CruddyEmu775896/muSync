@@ -3,11 +3,15 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: '/muSync/',
   build: {
-    target: 'es2020',
+    target: 'es2022',
     outDir: 'dist',
-    assetsInlineLimit: 0
+    assetsInlineLimit: 0,
+    sourcemap: false
   },
   optimizeDeps: {
-    exclude: ['sql.js']
+    include: ['sql.js']
+  },
+  worker: {
+    format: 'es'
   }
 });

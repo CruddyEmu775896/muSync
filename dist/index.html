@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>muSync</title>
+  <script type="module" crossorigin src="/muSync/assets/index-BQ5QfyLm.js"></script>
+  <link rel="stylesheet" crossorigin href="/muSync/assets/index-JtHDYJKs.css">
+</head>
+<body>
+  <header>
+    <h1>muSync</h1>
+    <p class="sub">Local-first music organizer</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Add a song</h2>
+      <input id="title" placeholder="Song title" />
+      <input id="artist" placeholder="Artist ; Artist ; Artist" />
+      <button id="add">Add</button>
+    </section>
+
+    <section class="panel">
+      <h2>Library</h2>
+      <div class="library-controls">
+        <input id="search" placeholder="Search title, artist..." />
+        <select id="sort">
+          <option value="added-desc">Date added (newest)</option>
+          <option value="added-asc">Date added (oldest)</option>
+          <option value="title-asc">Title A → Z</option>
+          <option value="title-desc">Title Z → A</option>
+          <option value="artist-asc">Artist A → Z</option>
+          <option value="artist-desc">Artist Z → A</option>
+        </select>
+      </div>
+      <p id="library-summary" class="muted" style="margin: 8px 0 0"></p>
+      <ul id="list"></ul>
+      <p id="empty" class="muted">No songs yet.</p>
+    </section>
+
+    <section class="panel">
+      <h2>What I know about you</h2>
+      <p class="muted" style="margin-top:0">
+        Every fact the algorithm has about your listening. Nothing is hidden.
+      </p>
+      <div id="knowledge" class="knowledge"></div>
+      <div style="margin-top:12px">
+        <button id="refresh-knowledge" class="small">Refresh</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Algorithm settings</h2>
+      <p class="muted" style="margin-top:0">
+        These weights control how Smart Shuffle will choose songs.
+        You can see exactly what each one does.
+      </p>
+      <div id="weights" class="weights"></div>
+      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
+        <button id="save-weights">Save weights</button>
+        <button id="reset-weights" class="small">Reset to defaults</button>
+      </div>
+      <p id="weights-status" class="muted" style="margin-bottom:0"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Backup</h2>
+      <p class="muted" style="margin-top:0">Save your library as a file, or restore from one.</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <button id="export-db">Download library</button>
+        <button id="import-db">Upload library</button>
+        <input id="import-file" type="file" accept=".db,.sqlite,application/octet-stream" hidden />
+      </div>
+      <p id="backup-status" class="muted" style="margin-bottom:0"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Import from CSV</h2>
+      <p class="muted" style="margin-top:0">
+        Your CSV needs two columns: one for the song title, one for the artist.
+        Header names are matched loosely (anything containing "title" and "artist").
+        Case is preserved exactly.
+      </p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <button id="import-csv-btn">Upload CSV</button>
+        <input id="import-csv-file" type="file" accept=".csv,text/csv" hidden />
+      </div>
+      <p id="csv-status" class="muted" style="margin-bottom:0"></p>
+    </section>
+  </main>
+
+  <footer id="player" class="player" hidden>
+    <div class="player-info">
+      <div id="player-title" class="player-title">—</div>
+      <div id="player-artist" class="player-artist muted"></div>
+    </div>
+    <audio id="audio" controls preload="metadata"></audio>
+  </footer>
+
+</body>
+</html>

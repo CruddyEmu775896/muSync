@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
   <title>muSync</title>
+  <link rel="manifest" href="/muSync/manifest.webmanifest" />
 </head>
 <body>
   <header>
@@ -12,13 +14,17 @@
   </header>
 
   <main>
+    <p id="status" class="muted status" hidden></p>
+
+    <!-- ADD -->
     <section class="panel">
       <h2>Add a song</h2>
       <input id="title" placeholder="Song title" />
-      <input id="artist" placeholder="Artist ; Artist ; Artist" />
+      <input id="artist" placeholder="Artist ; Artist ; feat. Artist" />
       <button id="add">Add</button>
     </section>
 
+    <!-- LIBRARY -->
     <section class="panel">
       <h2>Library</h2>
       <div class="library-controls">
@@ -30,6 +36,7 @@
           <option value="title-desc">Title Z → A</option>
           <option value="artist-asc">Artist A → Z</option>
           <option value="artist-desc">Artist Z → A</option>
+          <option value="manual">Manual order</option>
         </select>
       </div>
       <p id="library-summary" class="muted" style="margin: 8px 0 0"></p>
@@ -37,6 +44,55 @@
       <p id="empty" class="muted">No songs yet.</p>
     </section>
 
+    <!-- PLAYBACK MODE + QUEUE -->
+    <section class="panel">
+      <h2>Playback</h2>
+      <p class="muted" style="margin-top:0">
+        Choose how the next song gets picked. Smart uses your listening history.
+      </p>
+      <div class="mode-row">
+        <label><input type="radio" name="mode" value="none" /> No shuffle (manual order)</label>
+        <label><input type="radio" name="mode" value="random" /> Random</label>
+        <label><input type="radio" name="mode" value="smart" checked /> Smart</label>
+      </div>
+      <div class="mode-actions">
+        <button id="queue-build">Build queue from library</button>
+        <button id="queue-clear" class="small">Clear queue</button>
+      </div>
+
+      <h3 class="queue-heading">Queue</h3>
+      <p id="queue-summary" class="muted" style="margin: 4px 0 8px"></p>
+      <ol id="queue" class="queue"></ol>
+      <p id="queue-empty" class="muted">No queue yet.</p>
+    </section>
+
+    <!-- DUPLICATES -->
+    <section class="panel">
+      <h2>
+        Duplicates
+        <label class="toggle-inline">
+          <input type="checkbox" id="dupes-show" />
+          <span>show</span>
+        </label>
+      </h2>
+      <div id="dupes-controls" hidden>
+        <p class="muted" style="margin-top:0">
+          Exact matches on title + artist first. Enable fuzzy to catch near-duplicates.
+        </p>
+        <div class="dupes-actions">
+          <label class="toggle-inline">
+            <input type="checkbox" id="dupes-fuzzy" />
+            <span>fuzzy matching (title only, normalized)</span>
+          </label>
+          <button id="dupes-rescan" class="small">Rescan</button>
+          <button id="dupes-delete" class="small danger">Delete selected</button>
+        </div>
+        <div id="dupes-list" class="dupes-list"></div>
+        <p id="dupes-status" class="muted" style="margin: 8px 0 0"></p>
+      </div>
+    </section>
+
+    <!-- KNOWLEDGE -->
     <section class="panel">
       <h2>What I know about you</h2>
       <p class="muted" style="margin-top:0">
@@ -48,20 +104,24 @@
       </div>
     </section>
 
+    <!-- WEIGHTS -->
     <section class="panel">
       <h2>Algorithm settings</h2>
       <p class="muted" style="margin-top:0">
-        These weights control how Smart Shuffle will choose songs.
+        These weights control how Smart Shuffle chooses songs.
         You can see exactly what each one does.
       </p>
       <div id="weights" class="weights"></div>
+      <div id="weights-prompt" class="weights-prompt" hidden></div>
       <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
         <button id="save-weights">Save weights</button>
         <button id="reset-weights" class="small">Reset to defaults</button>
+        <button id="learn-toggle" class="small">Learning: on</button>
       </div>
       <p id="weights-status" class="muted" style="margin-bottom:0"></p>
     </section>
 
+    <!-- BACKUP -->
     <section class="panel">
       <h2>Backup</h2>
       <p class="muted" style="margin-top:0">Save your library as a file, or restore from one.</p>
@@ -73,12 +133,13 @@
       <p id="backup-status" class="muted" style="margin-bottom:0"></p>
     </section>
 
+    <!-- CSV -->
     <section class="panel">
       <h2>Import from CSV</h2>
       <p class="muted" style="margin-top:0">
-        Your CSV needs two columns: one for the song title, one for the artist.
-        Header names are matched loosely (anything containing "title" and "artist").
-        Case is preserved exactly.
+        Works with Spotify and YouTube Music exports.
+        Needs a title column and an artist column. Artists separated by semicolons
+        are preserved as multiple credits; "feat." inside artist strings is kept as-is.
       </p>
       <div style="display:flex; gap:8px; flex-wrap:wrap">
         <button id="import-csv-btn">Upload CSV</button>
@@ -96,6 +157,6 @@
     <audio id="audio" controls preload="metadata"></audio>
   </footer>
 
-  <script type="module" src="./src/main.js"></script>
+  <script type="module" src="/src/main.js"></script>
 </body>
 </html>

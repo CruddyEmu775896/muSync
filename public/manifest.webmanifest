@@ -1,7 +1,9 @@
 {
   "name": "muSync",
   "short_name": "muSync",
-  "start_url": "/musync/",
+  "description": "Local-first music organizer with a transparent algorithm.",
+  "start_url": "/muSync/",
+  "scope": "/muSync/",
   "display": "standalone",
   "background_color": "#0e0e10",
   "theme_color": "#0e0e10",
