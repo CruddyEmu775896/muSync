@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>muSync — Standalone Local Music Engine</title>
+  <!-- Load sql.js directly from CDN -->
+  <script src="https://cloudflare.com"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0e0e10;
+      --panel: #17171a;
+      --text: #eaeaea;
+      --muted: #8a8a92;
+      --accent: #7c5cff;
+      --border: #23232a;
+      --danger: #ff5a5a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding-bottom: 120px;
+    }
+    main { padding: 20px; display: grid; gap: 16px; max-width: 800px; margin: 0 auto; }
+    .panel { background: var(--panel); border-radius: 12px; padding: 16px; border: 1px solid var(--border); }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    input, button, select { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a2a30; background: #101014; color: var(--text); }
+    input { width: 100%; margin-bottom: 8px; }
+    button { background: var(--accent); border: none; cursor: pointer; font-weight: 600; }
+    button:hover { filter: brightness(1.1); }
+    button.small { font-size: 12px; padding: 6px 10px; border-radius: 6px; background: var(--border); color: var(--text); border: 1px solid #2e2e36; }
+    button.small.danger { background: #40201f; border-color: #5a2a2a; color: #ffb0b0; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .weight-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+    .weight-row input { width: 80px; margin: 0; text-align: right; }
+    .player { position: fixed; bottom: 0; left: 0; right: 0; background: #141418; border-top: 1px solid var(--border); padding: 16px; display: flex; align-items: center; gap: 16px; z-index: 100; }
+    .player audio { flex: 1; height: 32px; }
+    .reason { font-size: 11px; color: var(--muted); margin-left: 8px; font-style: italic; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <main>
+      <h1>muSync ⚡</h1>
+      <p class="sub muted">Local-first music organizer with a transparent algorithm.</p>
+    </main>
+  </header>
+
+  <main>
+    <!-- Add Song Panel -->
+    <div class="panel">
+      <h2>Add a Song</h2>
+      <input type="text" id="title" placeholder="Song Title">
+      <input type="text" id="artist" placeholder="Artist Name">
+      <button id="add">Add to Library</button>
+      <p id="status" class="muted" style="display:none;"></p>
+    </div>
+
+    <!-- Algorithm Settings Control Panel -->
+    <div class="panel">
+      <h2>Transparent Algorithm Settings</h2>
+      <p class="sub muted" style="margin-bottom: 12px;">Adjust slider metrics variables to change Smart Shuffle calculations.</p>
+      <div id="weights-controls">
+        <div class="weight-row"><span>Transition History Strength (A → B)</span><input type="number" id="w-transition" value="40" min="0" max="100"></div>
+        <div class="weight-row"><span>Novelty Boost (Time gaps since heard)</span><input type="number" id="w-novelty" value="25" min="0" max="100"></div>
+        <div class="weight-row"><span>Time-of-Day Slotted Routines</span><input type="number" id="w-timeOfDay" value="20" min="0" max="100"></div>
+        <div class="weight-row"><span>Skip Suppression Penalties</span><input type="number" id="w-skipPenalty" value="15" min="0" max="100"></div>
+      </div>
+    </div>
+
+    <!-- Playback Queue Controller Panel -->
+    <div class="panel">
+      <h2>Smart Playback Queue</h2>
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <button id="build-queue">Generate Smart Shuffle Queue</button>
+        <button id="clear-queue" style="background: #40201f; color: #ffb0b0;">Clear Queue</button>
+      </div>
+      <ul id="queue-list"></ul>
+      <p id="queue-empty" class="muted">Queue is empty. Click generate to launch selection matrix.</p>
+    </div>
+
+    <!-- Library Inventory Panel -->
+    <div class="panel">
+      <h2>Track Inventory <span id="library-summary" class="muted"></span></h2>
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <input type="text" id="search" placeholder="Search track vectors..." style="margin:0;">
+      </div>
+      <ul id="list"></ul>
+      <p id="empty" class="muted">No songs in your library yet.</p>
+    </div>
+  </main>
+
+  <!-- Fixed Global Player -->
+  <div class="player" id="player" hidden>
+    <div class="player-info" style="min-width:180px;">
+      <div id="player-title" style="font-weight:600;"></div>
+      <div id="player-artist" class="muted" style="font-size:12px;"></div>
+    </div>
+    <audio id="audio" controls></audio>
+  </div>
+
+  <script>
+    // --- INTEGRATED DATA ARCHITECTURE CORE ---
+    const DB_KEY = 'musync.standalone.db';
+    let db = null, dbReady = false, searchQuery = '', activeQueue = [], currentPlayingWorkId = null;
+
+    const SCHEMA = `
+      CREATE TABLE IF NOT EXISTS works (id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+      CREATE TABLE IF NOT EXISTS transitions (from_id TEXT, to_id TEXT, count INTEGER, PRIMARY KEY (from_id, to_id));
+      CREATE TABLE IF NOT EXISTS song_stats (work_id TEXT PRIMARY KEY, play_count INTEGER DEFAULT 0, skip_count INTEGER DEFAULT 0, last_played_at TEXT, hour_histogram_json TEXT DEFAULT '{}');
+      CREATE TABLE IF NOT EXISTS listening_events (id TEXT PRIMARY KEY, timestamp TEXT, work_id TEXT, event_type TEXT);
+    `;
+
+    const generateId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+
+    function getIndexedDB() {
+      return new Promise((resolve) => {
+        const req = indexedDB.open('musync-single-engine', 1);
+        req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv'); };
+        req.onsuccess = () => resolve(req.result);
+      });
+    }
+
+    async function loadDb() {
+      try {
+        const idb = await getIndexedDB();
+        return new Promise((resolve) => {
+          const tx = idb.transaction('kv', 'readonly');
+          const req = tx.objectStore('kv').get(DB_KEY);
+          req.onsuccess = () => resolve(req.result ? new window.initSqlJs.Database(new Uint8Array(req.result)) : null);
+          req.onerror = () => resolve(null);
+        });
+      } catch { return null; }
+    }
+
+    async function persist() {
+      if (!db) return;
+      try {
+        const data = db.export(); const idb = await getIndexedDB();
+        const tx = idb.transaction('kv', 'readwrite'); tx.objectStore('kv').put(data.buffer, DB_KEY);
+      } catch (e) { console.warn(e); }
+    }
+
+    // --- STANDALONE BOOT ENGINE ---
+    async function init() {
+      try {
+        window.initSqlJs = await window.initSqlJs({ locateFile: (file) => `https://cloudflare.com{file}` });
+        db = await loadDb();
+        if (!db) db = new window.initSqlJs.Database();
+        db.run(SCHEMA);
+        dbReady = true;
+        
+        wirePlayerAdvance(document.getElementById('audio'));
+        renderAll();
+      } catch (err) {
+        console.error(err);
+        document.getElementById('status').textContent = "Database loading failure. See console.";
+        document.getElementById('status').style.display = "block";
+      }
+    }
+
+    // --- MATHEMATICAL SMART SCORING EXTENSION (MARKOV CHAIN MATRIX) ---
+    function scoreTrack(candidateId, currentId, weights) {
+      const reasons = { transition: 0, novelty: 0, timeOfDay: 0, skipPenalty: 0 };
+      const nowMs = Date.now();
+
+      // 1. Evaluate historical structural transitions
+      if (currentId) {
+        const res = db.exec("SELECT count FROM transitions WHERE from_id = ? AND to_id = ?", [currentId, candidateId]);
+        if (res.length && res.values.length) {
+          const count = res.values[0][0];
+          const maxRes = db.exec("SELECT MAX(count) FROM transitions WHERE from_id = ?", [currentId]);
+          const maxCount = (maxRes.length && maxRes.values.length) ? maxRes.values[0][0] : 1;
+          reasons.transition = (count / maxCount) * weights.transition;
+        }
+      }
+
+      // 2. Compute incremental variance delta (Novelty)
+      const statRes = db.exec("SELECT play_count, skip_count, last_played_at, hour_histogram_json FROM song_stats WHERE work_id = ?", [candidateId]);
+      if (statRes.length && statRes.values.length) {
+        const [plays, skips, lastPlayed, histJson] = statRes.values[0];
+        
+        if (lastPlayed) {
+          const days = (nowMs - Date.parse(lastPlayed)) / 86400000;
+          reasons.novelty = Math.min(1, days / 14) * weights.novelty;
+        } else { reasons.novelty = weights.novelty; }
+
+        // 3. Time-of-day concentration
+        const hourKey = String(new Date().getHours()).padStart(2, '0');
+        try {
+          const hist = JSON.parse(histJson || '{}');
+          if (hist[hourKey] && plays > 0) reasons.timeOfDay = (hist[hourKey] / plays) * weights.timeOfDay;
+        } catch {}
+
+        // 4. Skip suppression ratio
+        if (plays > 0) reasons.skipPenalty = -(skips / plays) * weights.skipPenalty;
+      } else { reasons.novelty = weights.novelty; }
+
+      const totalScore = reasons.transition + reasons.novelty + reasons.timeOfDay + reasons.skipPenalty;
+      return { score: Math.round(totalScore * 10) / 10, reasons };
+    }
+
+    // --- PLAYBACK QUEUE SCHEDULER MECHANICS ---
+    function generateSmartQueue() {
+      if (!dbReady) return;
+      const res = db.exec("SELECT id, title, artist FROM works");
+      if (!res.length || !res.values.length) return;
+Use code with caution.
+const songs = res.values.map(([id, title, artist]) => ({ id, title, artist }));
+const weights = {
+transition: Number(document.getElementById('w-transition').value) || 0,
+novelty: Number(document.getElementById('w-novelty').value) || 0,
+timeOfDay: Number(document.getElementById('w-timeOfDay').value) || 0,
+skipPenalty: Number(document.getElementById('w-skipPenalty').value) || 0
+};
+let currentCursorId = currentPlayingWorkId || (songs.length ? songs[Math.floor(Math.random() * songs.length)].id : null);
+const tempQueue = [], visited = new Set();
+while (tempQueue.length < Math.min(100, songs.length)) {
+let bestCandidate = null, maxScore = -Infinity;
+for (const song of songs) {
+if (visited.has(song.id)) continue;
+const evaluation = scoreTrack(song.id, currentCursorId, weights);
+if (evaluation.score > maxScore) { maxScore = evaluation.score; bestCandidate = song; }
+}
+if (!bestCandidate) break;
+tempQueue.push({ workId: bestCandidate.id, title: bestCandidate.title, artist: bestCandidate.artist, score: maxScore });
+visited.add(bestCandidate.id);
+currentCursorId = bestCandidate.id;
+}
+activeQueue = tempQueue;
+renderQueueUI();
+}
+// --- LIFE CYCLE LOG ENGINE ---
+function commitPlaybackTelemetry(workId, eventType) {
+const now = new Date().toISOString();
+db.run("INSERT INTO listening_events (id, timestamp, work_id, event_type) VALUES (?, ?, ?, ?)", [generateId(), now, workId, eventType]);
+db.run("INSERT INTO song_stats (work_id, play_count, skip_count, last_played_at) VALUES (?, 0, 0, null) ON CONFLICT(work_id) DO NOTHING", [workId]);
+if (eventType === 'START') {
+db.run("UPDATE song_stats SET play_count = play_count + 1, last_played_at = ? WHERE work_id = ?", [now, workId]);
+const hour = String(new Date().getHours()).padStart(2, '0');
+const r = db.exec("SELECT hour_histogram_json FROM song_stats WHERE work_id = ?", [workId]);
+let hist = {};
+if (r.length && r.values.length) {
+try { hist = JSON.parse(r.values[0][0] || '{}'); } catch {}
+}
+hist[hour] = (hist[hour] || 0) + 1;
+db.run("UPDATE song_stats SET hour_histogram_json = ? WHERE work_id = ?", [JSON.stringify(hist), workId]);
+if (currentPlayingWorkId && currentPlayingWorkId !== workId) {
+db.run("INSERT INTO transitions (from_id, to_id, count) VALUES (?, ?, 0) ON CONFLICT(from_id, to_id) DO NOTHING", [currentPlayingWorkId, workId]);
+db.run("UPDATE transitions SET count = count + 1 WHERE from_id = ? AND to_id = ?", [currentPlayingWorkId, workId]);
+}
+} else if (eventType === 'SKIP') {
+db.run("UPDATE song_stats SET skip_count = skip_count + 1 WHERE work_id = ?", [workId]);
+}
+persist();
+}
+// --- AUTOMATIC TRACK CHANGE OVERLAYS ---
+function wirePlayerAdvance(audioElement) {
+if (!audioElement) return;
+audioElement.onended = () => {
+if (currentPlayingWorkId) commitPlaybackTelemetry(currentPlayingWorkId, 'COMPLETE');
+if (activeQueue.length > 0) {
+const nextTrack = activeQueue.shift();
+renderQueueUI();
+dispatchPlayback(nextTrack.workId, nextTrack.title, nextTrack.artist);
+}
+};
+}
+function dispatchPlayback(workId, title, artist) {
+if (currentPlayingWorkId) {
+const audio = document.getElementById('audio');
+if (audio.currentTime < 10) commitPlaybackTelemetry(currentPlayingWorkId, 'SKIP');
+}
+currentPlayingWorkId = workId;
+document.getElementById('player-title').textContent = title;
+document.getElementById('player-artist').textContent = artist || 'Unknown Artist';
+document.getElementById('player').hidden = false;
+// Standalone simulation audio asset (generates light mock silence buffer track)
+const mockSilenceBlob = new Blob([new Uint8Array(44100 * 2)], { type: 'audio/wav' });
+document.getElementById('audio').src = URL.createObjectURL(mockSilenceBlob);
+commitPlaybackTelemetry(workId, 'START');
+document.getElementById('audio').play();
+}
+// --- RE-RENDERING ENGINE CONTEXT ---
+function renderQueueUI() {
+const list = document.getElementById('queue-list'), empty = document.getElementById('queue-empty');
+list.innerHTML = ''; empty.style.display = activeQueue.length ? 'none' : 'block';
+activeQueue.forEach((it, i) => {
+const li = document.createElement('li');
+li.innerHTML = <span><strong>${escapeHtml(it.title)}</strong><span class="reason">predicted index score: ${it.score}</span></span><button class="small" id="q-rm-${i}">×</button>;
+list.appendChild(li);
+li.querySelector(#q-rm-${i}).onclick = () => { activeQueue.splice(i, 1); renderQueueUI(); };
+});
+}
+function renderAll() {
+renderQueueUI();
+const list = document.getElementById('list'), empty = document.getElementById('empty'), summary = document.getElementById('library-summary');
+list.innerHTML = ''; let rows = [];
+try {
+const res = db.exec("SELECT id, title, artist FROM works ORDER BY created_at DESC");
+if (res.length) rows = res.values.map(([id, title, artist]) => ({ id, title, artist }));
+} catch (e) {}
+const filtered = rows.filter(r => !searchQuery || r.title.toLowerCase().includes(searchQuery) || r.artist.toLowerCase().includes(searchQuery));
+empty.style.display = filtered.length ? 'none' : 'block';
+summary.textContent = rows.length ? (${filtered.length} total) : '';
+filtered.forEach(s => {
+const li = document.createElement('li');
+li.innerHTML = <span><strong>${escapeHtml(s.title)}</strong><span class="muted"> — ${escapeHtml(s.artist || 'Unknown')}</span></span><div><button class="small" data-play="${s.id}">Play</button><button class="small danger" data-del="${s.id}">×</button></div>;
+list.appendChild(li);
+li.querySelector('[data-play]').onclick = () => dispatchPlayback(s.id, s.title, s.artist);
+li.querySelector('[data-del]').onclick = () => { db.run("DELETE FROM works WHERE id = ?", [s.id]); persist(); renderAll(); };
+});
+}
+function escapeHtml(str) { return String(str).replace(/[&<>"']/g, c => ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": ''' }[c])); }
+// --- INTERCEPT WIRINGS ---
+document.getElementById('add').onclick = () => {
+const t = document.getElementById('title').value, a = document.getElementById('artist').value;
+if (!t.trim()) return; db.run("INSERT INTO works (id, title, artist) VALUES (?, ?, ?)", [generateId(), t.trim(), a.trim()]);
+document.getElementById('title').value = ''; document.getElementById('artist').value = ''; persist(); renderAll();
+};
+document.getElementById('search').oninput = (e) => { searchQuery = e.target.value.toLowerCase(); renderAll(); };
+document.getElementById('build-queue').onclick = generateSmartQueue;
+document.getElementById('clear-queue').onclick = () => { activeQueue = []; renderQueueUI(); };
+init();
