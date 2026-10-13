@@ -1,331 +1,711 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>muSync — Standalone Local Music Engine</title>
-  <!-- Load sql.js directly from CDN -->
-  <script src="https://cloudflare.com"></script>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #0e0e10;
-      --panel: #17171a;
-      --text: #eaeaea;
-      --muted: #8a8a92;
-      --accent: #7c5cff;
-      --border: #23232a;
-      --danger: #ff5a5a;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      padding-bottom: 120px;
-    }
-    main { padding: 20px; display: grid; gap: 16px; max-width: 800px; margin: 0 auto; }
-    .panel { background: var(--panel); border-radius: 12px; padding: 16px; border: 1px solid var(--border); }
-    h2 { margin: 0 0 12px; font-size: 18px; }
-    input, button, select { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a2a30; background: #101014; color: var(--text); }
-    input { width: 100%; margin-bottom: 8px; }
-    button { background: var(--accent); border: none; cursor: pointer; font-weight: 600; }
-    button:hover { filter: brightness(1.1); }
-    button.small { font-size: 12px; padding: 6px 10px; border-radius: 6px; background: var(--border); color: var(--text); border: 1px solid #2e2e36; }
-    button.small.danger { background: #40201f; border-color: #5a2a2a; color: #ffb0b0; }
-    ul { list-style: none; padding: 0; margin: 0; }
-    li { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-    .muted { color: var(--muted); font-size: 14px; }
-    .weight-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--border); }
-    .weight-row input { width: 80px; margin: 0; text-align: right; }
-    .player { position: fixed; bottom: 0; left: 0; right: 0; background: #141418; border-top: 1px solid var(--border); padding: 16px; display: flex; align-items: center; gap: 16px; z-index: 100; }
-    .player audio { flex: 1; height: 32px; }
-    .reason { font-size: 11px; color: var(--muted); margin-left: 8px; font-style: italic; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>muSync — Local-first music organizer</title>
+<style>
+:root{color-scheme:dark;--bg:#0e0e10;--panel:#17171a;--text:#eaeaea;--muted:#8a8a92;--accent:#7c5cff;--border:#23232a}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);padding-bottom:96px}
+header,main{max-width:760px;margin:0 auto;padding:0 16px}
+header{padding-top:26px}
+h1{margin:0;font-size:24px;letter-spacing:-.02em}
+h2{font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+h3{font-size:12px;margin:16px 0 4px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+main{display:grid;gap:14px;padding-bottom:24px}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px}
+.muted{color:var(--muted)}
+p.muted{font-size:12.5px;margin:0 0 10px}
+input,select,button{font:inherit;color:var(--text);background:#101014;border:1px solid #2a2a30;border-radius:8px;padding:8px 10px}
+input:focus,select:focus{outline:1px solid var(--accent);outline-offset:0}
+button{background:var(--accent);border-color:transparent;font-weight:600;cursor:pointer}
+button:hover{filter:brightness(1.12)}
+button.ghost{background:#101014;border-color:#2a2a30;font-weight:500}
+button.mini{padding:4px 9px;font-size:12px;font-weight:500;background:#101014;border-color:#2a2a30}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row input{flex:1;min-width:130px}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+li:last-child{border-bottom:none}
+.t{font-weight:600}
+.s{font-size:12px}
+.acts{display:flex;gap:6px;flex:0 0 auto}
+.reason{font-size:11px;color:var(--muted);font-style:italic;margin-left:6px}
+.radios{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;font-size:13px}
+.radios label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.radios input{accent-color:var(--accent)}
+.wrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dashed var(--border)}
+.wrow:last-of-type{border-bottom:none}
+.wrow input{width:74px;text-align:right;padding:6px 8px}
+code{background:#101014;padding:1px 4px;border-radius:4px;font-size:12px}
+.player{position:fixed;left:0;right:0;bottom:0;display:flex;align-items:center;gap:12px;padding:12px 16px;background:#141418;border-top:1px solid var(--border);z-index:10}
+.player .meta{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{height:4px;background:#26262e;border-radius:2px;flex:0 0 30%;max-width:220px;overflow:hidden}
+.bar>div{height:100%;width:0;background:var(--accent);transition:width .2s linear}
+.dupg{padding:8px 0;border-bottom:1px solid var(--border)}
+.dupg:last-child{border-bottom:none}
+.dupg ul li{padding:4px 0;border:none}
+</style>
 </head>
 <body>
 
-  <header>
-    <main>
-      <h1>muSync ⚡</h1>
-      <p class="sub muted">Local-first music organizer with a transparent algorithm.</p>
-    </main>
-  </header>
+<header>
+  <h1>muSync</h1>
+  <p class="muted" style="margin:2px 0 0">Local-first music organizer</p>
+</header>
 
-  <main>
-    <!-- Add Song Panel -->
-    <div class="panel">
-      <h2>Add a Song</h2>
-      <input type="text" id="title" placeholder="Song Title">
-      <input type="text" id="artist" placeholder="Artist Name">
-      <button id="add">Add to Library</button>
-      <p id="status" class="muted" style="display:none;"></p>
-    </div>
+<main>
 
-    <!-- Algorithm Settings Control Panel -->
-    <div class="panel">
-      <h2>Transparent Algorithm Settings</h2>
-      <p class="sub muted" style="margin-bottom: 12px;">Adjust slider metrics variables to change Smart Shuffle calculations.</p>
-      <div id="weights-controls">
-        <div class="weight-row"><span>Transition History Strength (A → B)</span><input type="number" id="w-transition" value="40" min="0" max="100"></div>
-        <div class="weight-row"><span>Novelty Boost (Time gaps since heard)</span><input type="number" id="w-novelty" value="25" min="0" max="100"></div>
-        <div class="weight-row"><span>Time-of-Day Slotted Routines</span><input type="number" id="w-timeOfDay" value="20" min="0" max="100"></div>
-        <div class="weight-row"><span>Skip Suppression Penalties</span><input type="number" id="w-skipPenalty" value="15" min="0" max="100"></div>
-      </div>
+  <section class="panel">
+    <h2>Add a song</h2>
+    <div class="row">
+      <input id="title" placeholder="Song title" autocomplete="off">
+      <input id="artist" placeholder="Artist — feat. Artist" autocomplete="off">
+      <button id="add">Add</button>
     </div>
+  </section>
 
-    <!-- Playback Queue Controller Panel -->
-    <div class="panel">
-      <h2>Smart Playback Queue</h2>
-      <div style="display:flex; gap:8px; margin-bottom:12px;">
-        <button id="build-queue">Generate Smart Shuffle Queue</button>
-        <button id="clear-queue" style="background: #40201f; color: #ffb0b0;">Clear Queue</button>
-      </div>
-      <ul id="queue-list"></ul>
-      <p id="queue-empty" class="muted">Queue is empty. Click generate to launch selection matrix.</p>
+  <section class="panel">
+    <h2>Library <span id="lib-count" class="muted s"></span></h2>
+    <div class="row" style="margin-bottom:8px">
+      <input id="search" placeholder="Search title, artist" autocomplete="off">
+      <select id="sort">
+        <option value="added-desc">Date added (newest)</option>
+        <option value="added-asc">Date added (oldest)</option>
+        <option value="title">Title (A–Z)</option>
+        <option value="artist">Artist (A–Z)</option>
+        <option value="plays">Most played</option>
+      </select>
     </div>
+    <ul id="list"></ul>
+    <p id="empty" class="muted">No songs yet.</p>
+  </section>
 
-    <!-- Library Inventory Panel -->
-    <div class="panel">
-      <h2>Track Inventory <span id="library-summary" class="muted"></span></h2>
-      <div style="display:flex; gap:8px; margin-bottom:12px;">
-        <input type="text" id="search" placeholder="Search track vectors..." style="margin:0;">
-      </div>
-      <ul id="list"></ul>
-      <p id="empty" class="muted">No songs in your library yet.</p>
+  <section class="panel">
+    <h2>Playback</h2>
+    <p class="muted">Choose how the next song gets picked. Smart uses your listening history.</p>
+    <div class="radios">
+      <label><input type="radio" name="mode" value="none"> No shuffle (manual order)</label>
+      <label><input type="radio" name="mode" value="random"> Random</label>
+      <label><input type="radio" name="mode" value="smart"> Smart</label>
     </div>
-  </main>
+    <div class="row">
+      <button id="build">Build queue from library</button>
+      <button id="clear" class="ghost">Clear queue</button>
+    </div>
+    <p class="muted" style="margin:10px 0 0">Playback is simulated in this single-file build (no audio files are attached to tracks). Each virtual track runs 20&nbsp;s so the algorithm has something to learn from.</p>
+    <h3>Queue</h3>
+    <ul id="queue"></ul>
+    <p id="queue-empty" class="muted">No queue yet.</p>
+  </section>
 
-  <!-- Fixed Global Player -->
-  <div class="player" id="player" hidden>
-    <div class="player-info" style="min-width:180px;">
-      <div id="player-title" style="font-weight:600;"></div>
-      <div id="player-artist" class="muted" style="font-size:12px;"></div>
+  <section class="panel">
+    <h2>Duplicates <button id="dup-toggle" class="mini">show</button></h2>
+    <div id="dups" hidden></div>
+  </section>
+
+  <section class="panel">
+    <h2>What I know about you</h2>
+    <p class="muted">Every fact the algorithm has about your listening. Nothing is hidden.</p>
+    <ul id="facts"></ul>
+    <button id="refresh" class="mini" style="margin-top:10px">Refresh</button>
+  </section>
+
+  <section class="panel">
+    <h2>Algorithm settings</h2>
+    <p class="muted">These weights control how Smart Shuffle chooses songs. You can see exactly what each one does.</p>
+    <div class="wrow"><span>Transition history strength (A → B)</span><input type="number" id="w-transition" min="0" max="100"></div>
+    <div class="wrow"><span>Novelty boost (time since last heard)</span><input type="number" id="w-novelty" min="0" max="100"></div>
+    <div class="wrow"><span>Time-of-day routine match</span><input type="number" id="w-timeOfDay" min="0" max="100"></div>
+    <div class="wrow"><span>Skip suppression penalty</span><input type="number" id="w-skipPenalty" min="0" max="100"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="save-w">Save weights</button>
+      <button id="reset-w" class="ghost">Reset to defaults</button>
+      <button id="learn" class="ghost">Learning: on</button>
+      <span id="w-msg" class="muted s"></span>
     </div>
-    <audio id="audio" controls></audio>
+  </section>
+
+  <section class="panel">
+    <h2>Backup</h2>
+    <p class="muted">Save your library as a file, or restore from one.</p>
+    <div class="row">
+      <button id="dl">Download library</button>
+      <button id="ul" class="ghost">Upload library</button>
+      <input type="file" id="ul-file" accept=".json,application/json" hidden>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Import from CSV</h2>
+    <p class="muted">Works with Spotify and YouTube Music exports. Needs a <code>title</code> column and an <code>artist</code> column. Artists separated by semicolons are preserved as multiple credits; “feat.” inside artist strings is kept as-is.</p>
+    <button id="csv-btn">Upload CSV</button>
+    <input type="file" id="csv-file" accept=".csv,text/csv" hidden>
+    <p id="io-msg" class="muted" style="margin:10px 0 0"></p>
+  </section>
+
+</main>
+
+<div class="player" id="player" hidden>
+  <div class="meta">
+    <div id="np-title" class="t"></div>
+    <div id="np-artist" class="muted s"></div>
   </div>
+  <div class="bar"><div id="np-progress"></div></div>
+  <button id="skip" class="mini">Skip</button>
+  <button id="stop" class="mini">Stop</button>
+</div>
 
-  <script>
-    // --- INTEGRATED DATA ARCHITECTURE CORE ---
-    const DB_KEY = 'musync.standalone.db';
-    let db = null, dbReady = false, searchQuery = '', activeQueue = [], currentPlayingWorkId = null;
+<script>
+"use strict";
 
-    const SCHEMA = `
-      CREATE TABLE IF NOT EXISTS works (id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
-      CREATE TABLE IF NOT EXISTS transitions (from_id TEXT, to_id TEXT, count INTEGER, PRIMARY KEY (from_id, to_id));
-      CREATE TABLE IF NOT EXISTS song_stats (work_id TEXT PRIMARY KEY, play_count INTEGER DEFAULT 0, skip_count INTEGER DEFAULT 0, last_played_at TEXT, hour_histogram_json TEXT DEFAULT '{}');
-      CREATE TABLE IF NOT EXISTS listening_events (id TEXT PRIMARY KEY, timestamp TEXT, work_id TEXT, event_type TEXT);
-    `;
+/* ---------- state ---------- */
+const KEY = "musync.v1";
+const DEFAULT_WEIGHTS = { transition: 40, novelty: 25, timeOfDay: 20, skipPenalty: 15 };
+const VTRACK = 20000;      // simulated track length (ms)
+const QUEUE_CAP = 500;     // keep the greedy sort fast on big libraries
+const EVENT_CAP = 200;
 
-    const generateId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const find = id => S.works.find(w => w.id === id);
+const clamp = n => Math.max(0, Math.min(100, Number(n) || 0));
 
-    function getIndexedDB() {
-      return new Promise((resolve) => {
-        const req = indexedDB.open('musync-single-engine', 1);
-        req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv'); };
-        req.onsuccess = () => resolve(req.result);
-      });
+function blank() {
+  return { works: [], transitions: {}, events: [], weights: { ...DEFAULT_WEIGHTS }, learning: true, mode: "smart" };
+}
+
+let S = (() => {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      const b = blank();
+      return {
+        works: Array.isArray(d.works) ? d.works : b.works,
+        transitions: d.transitions && typeof d.transitions === "object" ? d.transitions : {},
+        events: Array.isArray(d.events) ? d.events : [],
+        weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) },
+        learning: d.learning !== false,
+        mode: ["none", "random", "smart"].includes(d.mode) ? d.mode : "smart"
+      };
     }
+  } catch (e) { console.warn("load failed", e); }
+  return blank();
+})();
 
-    async function loadDb() {
-      try {
-        const idb = await getIndexedDB();
-        return new Promise((resolve) => {
-          const tx = idb.transaction('kv', 'readonly');
-          const req = tx.objectStore('kv').get(DB_KEY);
-          req.onsuccess = () => resolve(req.result ? new window.initSqlJs.Database(new Uint8Array(req.result)) : null);
-          req.onerror = () => resolve(null);
-        });
-      } catch { return null; }
+let Q = [];                     // queue: [{id, score|null}]
+let lastId = null;              // previous track, for transition counting
+const P = { id: null, start: 0, timer: null, done: false };
+
+let saveTimer;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(KEY, JSON.stringify(S)); }
+    catch (e) { console.warn("save failed", e); }
+  }, 150);
+}
+
+/* ---------- telemetry ---------- */
+function logEvent(workId, type) {
+  S.events.push({ t: Date.now(), w: workId, e: type });
+  if (S.events.length > EVENT_CAP) S.events.splice(0, S.events.length - EVENT_CAP);
+}
+function bumpTransition(a, b) {
+  const k = a + "|" + b;
+  S.transitions[k] = (S.transitions[k] || 0) + 1;
+}
+
+/* ---------- smart shuffle scoring ---------- */
+function score(w, cur, W, maxOut) {
+  const r = { transition: 0, novelty: 0, timeOfDay: 0, skipPenalty: 0 };
+
+  if (cur && cur !== w.id) {
+    const c = S.transitions[cur + "|" + w.id] || 0;
+    if (c) r.transition = (c / (maxOut[cur] || 1)) * W.transition;
+  }
+
+  if (w.lastPlayed) {
+    const days = (Date.now() - w.lastPlayed) / 86400000;
+    r.novelty = Math.min(1, days / 14) * W.novelty;
+  } else {
+    r.novelty = W.novelty;
+  }
+
+  const h = new Date().getHours();
+  if (w.plays > 0 && w.hours && w.hours[h]) r.timeOfDay = (w.hours[h] / w.plays) * W.timeOfDay;
+  if (w.plays > 0) r.skipPenalty = -(w.skips / w.plays) * W.skipPenalty;
+
+  return { score: r.transition + r.novelty + r.timeOfDay + r.skipPenalty, reasons: r };
+}
+
+function readWeights() {
+  return {
+    transition: clamp($("w-transition").value),
+    novelty: clamp($("w-novelty").value),
+    timeOfDay: clamp($("w-timeOfDay").value),
+    skipPenalty: clamp($("w-skipPenalty").value)
+  };
+}
+function syncWeights() {
+  for (const k in DEFAULT_WEIGHTS) $("w-" + k).value = S.weights[k];
+}
+
+/* ---------- queue building ---------- */
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function buildQueue() {
+  if (!S.works.length) { Q = []; renderQueue(); return; }
+
+  if (S.mode === "none") {
+    Q = S.works.slice().sort((a, b) => a.addedAt - b.addedAt).map(w => ({ id: w.id, score: null }));
+  } else if (S.mode === "random") {
+    Q = shuffle(S.works.slice()).map(w => ({ id: w.id, score: null }));
+  } else {
+    const W = readWeights();
+    const maxOut = {};
+    for (const k in S.transitions) {
+      const f = k.slice(0, k.indexOf("|"));
+      if (S.transitions[k] > (maxOut[f] || 0)) maxOut[f] = S.transitions[k];
     }
+    let cur = (P.id && find(P.id)) ? P.id : null;
+    const avail = S.works.filter(w => w.id !== cur);
+    const out = [];
+    const cap = Math.min(avail.length, QUEUE_CAP);
 
-    async function persist() {
-      if (!db) return;
-      try {
-        const data = db.export(); const idb = await getIndexedDB();
-        const tx = idb.transaction('kv', 'readwrite'); tx.objectStore('kv').put(data.buffer, DB_KEY);
-      } catch (e) { console.warn(e); }
-    }
-
-    // --- STANDALONE BOOT ENGINE ---
-    async function init() {
-      try {
-        window.initSqlJs = await window.initSqlJs({ locateFile: (file) => `https://cloudflare.com{file}` });
-        db = await loadDb();
-        if (!db) db = new window.initSqlJs.Database();
-        db.run(SCHEMA);
-        dbReady = true;
-        
-        wirePlayerAdvance(document.getElementById('audio'));
-        renderAll();
-      } catch (err) {
-        console.error(err);
-        document.getElementById('status').textContent = "Database loading failure. See console.";
-        document.getElementById('status').style.display = "block";
+    while (out.length < cap && avail.length) {
+      let bi = 0, bs = -Infinity;
+      for (let i = 0; i < avail.length; i++) {
+        const s = score(avail[i], cur, W, maxOut).score;
+        if (s > bs) { bs = s; bi = i; }
       }
+      const pick = avail.splice(bi, 1)[0];
+      out.push({ id: pick.id, score: Math.round(bs * 10) / 10 });
+      cur = pick.id;
     }
+    Q = out;
+  }
+  renderQueue();
+}
 
-    // --- MATHEMATICAL SMART SCORING EXTENSION (MARKOV CHAIN MATRIX) ---
-    function scoreTrack(candidateId, currentId, weights) {
-      const reasons = { transition: 0, novelty: 0, timeOfDay: 0, skipPenalty: 0 };
-      const nowMs = Date.now();
+/* ---------- playback ---------- */
+function play(id) {
+  const w = find(id);
+  if (!w || P.id === id) return;
+  stop();
 
-      // 1. Evaluate historical structural transitions
-      if (currentId) {
-        const res = db.exec("SELECT count FROM transitions WHERE from_id = ? AND to_id = ?", [currentId, candidateId]);
-        if (res.length && res.values.length) {
-          const count = res.values[0][0];
-          const maxRes = db.exec("SELECT MAX(count) FROM transitions WHERE from_id = ?", [currentId]);
-          const maxCount = (maxRes.length && maxRes.values.length) ? maxRes.values[0][0] : 1;
-          reasons.transition = (count / maxCount) * weights.transition;
-        }
-      }
+  if (S.learning) {
+    if (lastId && lastId !== id && find(lastId)) bumpTransition(lastId, id);
+    w.plays++;
+    w.lastPlayed = Date.now();
+    const h = new Date().getHours();
+    w.hours = w.hours || {};
+    w.hours[h] = (w.hours[h] || 0) + 1;
+    logEvent(id, "START");
+  }
+  lastId = id;
 
-      // 2. Compute incremental variance delta (Novelty)
-      const statRes = db.exec("SELECT play_count, skip_count, last_played_at, hour_histogram_json FROM song_stats WHERE work_id = ?", [candidateId]);
-      if (statRes.length && statRes.values.length) {
-        const [plays, skips, lastPlayed, histJson] = statRes.values[0];
-        
-        if (lastPlayed) {
-          const days = (nowMs - Date.parse(lastPlayed)) / 86400000;
-          reasons.novelty = Math.min(1, days / 14) * weights.novelty;
-        } else { reasons.novelty = weights.novelty; }
+  P.id = id; P.start = Date.now(); P.done = false;
+  P.timer = setInterval(tick, 200);
+  tick();
+  renderNow();
+  save();
+}
 
-        // 3. Time-of-day concentration
-        const hourKey = String(new Date().getHours()).padStart(2, '0');
-        try {
-          const hist = JSON.parse(histJson || '{}');
-          if (hist[hourKey] && plays > 0) reasons.timeOfDay = (hist[hourKey] / plays) * weights.timeOfDay;
-        } catch {}
+function tick() {
+  if (!P.id) return;
+  const p = Math.min(1, (Date.now() - P.start) / VTRACK);
+  $("np-progress").style.width = (p * 100).toFixed(1) + "%";
+  if (p >= 1) {
+    P.done = true;
+    if (P.timer) { clearInterval(P.timer); P.timer = null; }
+    if (S.learning) logEvent(P.id, "COMPLETE");
+    save();
+    advance();
+  }
+}
 
-        // 4. Skip suppression ratio
-        if (plays > 0) reasons.skipPenalty = -(skips / plays) * weights.skipPenalty;
-      } else { reasons.novelty = weights.novelty; }
-
-      const totalScore = reasons.transition + reasons.novelty + reasons.timeOfDay + reasons.skipPenalty;
-      return { score: Math.round(totalScore * 10) / 10, reasons };
+function stop() {
+  if (P.timer) { clearInterval(P.timer); P.timer = null; }
+  if (P.id && !P.done) {
+    const el = Date.now() - P.start;
+    const w = find(P.id);
+    if (w && S.learning && el < VTRACK * 0.5) {
+      w.skips++;
+      logEvent(P.id, "SKIP");
     }
+  }
+  P.id = null; P.done = false;
+  $("np-progress").style.width = "0%";
+  renderNow();
+  save();
+}
 
-    // --- PLAYBACK QUEUE SCHEDULER MECHANICS ---
-    function generateSmartQueue() {
-      if (!dbReady) return;
-      const res = db.exec("SELECT id, title, artist FROM works");
-      if (!res.length || !res.values.length) return;
-Use code with caution.
-const songs = res.values.map(([id, title, artist]) => ({ id, title, artist }));
-const weights = {
-transition: Number(document.getElementById('w-transition').value) || 0,
-novelty: Number(document.getElementById('w-novelty').value) || 0,
-timeOfDay: Number(document.getElementById('w-timeOfDay').value) || 0,
-skipPenalty: Number(document.getElementById('w-skipPenalty').value) || 0
-};
-let currentCursorId = currentPlayingWorkId || (songs.length ? songs[Math.floor(Math.random() * songs.length)].id : null);
-const tempQueue = [], visited = new Set();
-while (tempQueue.length < Math.min(100, songs.length)) {
-let bestCandidate = null, maxScore = -Infinity;
-for (const song of songs) {
-if (visited.has(song.id)) continue;
-const evaluation = scoreTrack(song.id, currentCursorId, weights);
-if (evaluation.score > maxScore) { maxScore = evaluation.score; bestCandidate = song; }
+function advance() {
+  if (Q.length) {
+    const next = Q.shift();
+    renderQueue();
+    play(next.id);
+  } else {
+    stop();
+  }
 }
-if (!bestCandidate) break;
-tempQueue.push({ workId: bestCandidate.id, title: bestCandidate.title, artist: bestCandidate.artist, score: maxScore });
-visited.add(bestCandidate.id);
-currentCursorId = bestCandidate.id;
+
+/* ---------- rendering ---------- */
+function renderNow() {
+  const w = P.id ? find(P.id) : null;
+  $("player").hidden = !w;
+  if (w) {
+    $("np-title").textContent = w.title;
+    $("np-artist").textContent = w.artist || "Unknown artist";
+  }
 }
-activeQueue = tempQueue;
-renderQueueUI();
+
+function renderQueue() {
+  $("queue-empty").hidden = Q.length > 0;
+  $("queue").innerHTML = Q.map((it, i) => {
+    const w = find(it.id);
+    if (!w) return "";
+    return `<li>
+      <div style="min-width:0">
+        <span class="t">${esc(w.title)}</span>
+        <span class="s muted">— ${esc(w.artist || "Unknown artist")}</span>
+        ${it.score == null ? "" : `<span class="reason">score ${it.score}</span>`}
+      </div>
+      <button class="mini" data-rm="${i}" title="Remove">×</button>
+    </li>`;
+  }).join("");
 }
-// --- LIFE CYCLE LOG ENGINE ---
-function commitPlaybackTelemetry(workId, eventType) {
-const now = new Date().toISOString();
-db.run("INSERT INTO listening_events (id, timestamp, work_id, event_type) VALUES (?, ?, ?, ?)", [generateId(), now, workId, eventType]);
-db.run("INSERT INTO song_stats (work_id, play_count, skip_count, last_played_at) VALUES (?, 0, 0, null) ON CONFLICT(work_id) DO NOTHING", [workId]);
-if (eventType === 'START') {
-db.run("UPDATE song_stats SET play_count = play_count + 1, last_played_at = ? WHERE work_id = ?", [now, workId]);
-const hour = String(new Date().getHours()).padStart(2, '0');
-const r = db.exec("SELECT hour_histogram_json FROM song_stats WHERE work_id = ?", [workId]);
-let hist = {};
-if (r.length && r.values.length) {
-try { hist = JSON.parse(r.values[0][0] || '{}'); } catch {}
+
+function renderLibrary() {
+  const q = $("search").value.trim().toLowerCase();
+  const sort = $("sort").value;
+  let rows = S.works.slice();
+
+  if (q) rows = rows.filter(w => (w.title + " " + (w.artist || "")).toLowerCase().includes(q));
+
+  const cmp = {
+    "added-desc": (a, b) => b.addedAt - a.addedAt,
+    "added-asc": (a, b) => a.addedAt - b.addedAt,
+    "title": (a, b) => a.title.localeCompare(b.title),
+    "artist": (a, b) => (a.artist || "").localeCompare(b.artist || "") || a.title.localeCompare(b.title),
+    "plays": (a, b) => b.plays - a.plays || a.title.localeCompare(b.title)
+  }[sort];
+  rows.sort(cmp);
+
+  $("lib-count").textContent = S.works.length ? `${rows.length} of ${S.works.length}` : "";
+  $("empty").hidden = rows.length > 0;
+
+  $("list").innerHTML = rows.map(w => {
+    const bits = [`${w.plays} play${w.plays === 1 ? "" : "s"}`];
+    if (w.skips) bits.push(`${w.skips} skip${w.skips === 1 ? "" : "s"}`);
+    if (w.lastPlayed) bits.push("last " + ago(w.lastPlayed));
+    return `<li>
+      <div style="min-width:0">
+        <div class="t">${esc(w.title)} <span class="s muted">— ${esc(w.artist || "Unknown artist")}</span></div>
+        <div class="s muted">${bits.join(" · ")}</div>
+      </div>
+      <div class="acts">
+        <button class="mini" data-play="${w.id}">Play</button>
+        <button class="mini" data-del="${w.id}" title="Delete">×</button>
+      </div>
+    </li>`;
+  }).join("");
 }
-hist[hour] = (hist[hour] || 0) + 1;
-db.run("UPDATE song_stats SET hour_histogram_json = ? WHERE work_id = ?", [JSON.stringify(hist), workId]);
-if (currentPlayingWorkId && currentPlayingWorkId !== workId) {
-db.run("INSERT INTO transitions (from_id, to_id, count) VALUES (?, ?, 0) ON CONFLICT(from_id, to_id) DO NOTHING", [currentPlayingWorkId, workId]);
-db.run("UPDATE transitions SET count = count + 1 WHERE from_id = ? AND to_id = ?", [currentPlayingWorkId, workId]);
+
+function ago(ts) {
+  const s = (Date.now() - ts) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
 }
-} else if (eventType === 'SKIP') {
-db.run("UPDATE song_stats SET skip_count = skip_count + 1 WHERE work_id = ?", [workId]);
+
+function renderDups() {
+  const groups = {};
+  S.works.forEach(w => {
+    const k = norm(w.title) + "|" + norm(w.artist);
+    (groups[k] = groups[k] || []).push(w);
+  });
+  const dups = Object.values(groups).filter(g => g.length > 1);
+  const el = $("dups");
+
+  if (!dups.length) { el.innerHTML = '<p class="muted" style="margin:0">No duplicates found.</p>'; return; }
+
+  el.innerHTML = dups.map(g => `
+    <div class="dupg">
+      <div class="s muted">${g.length} copies</div>
+      <ul>${g.map(w => `<li>
+        <span>${esc(w.title)} <span class="s muted">— ${esc(w.artist || "Unknown artist")}</span></span>
+        <button class="mini" data-del="${w.id}" title="Delete this copy">×</button>
+      </li>`).join("")}</ul>
+    </div>`).join("");
 }
-persist();
+
+function renderFacts() {
+  const el = $("facts");
+  const works = S.works;
+
+  if (!works.length) {
+    el.innerHTML = '<li class="muted">Nothing yet — add or import some songs and play them.</li>';
+    return;
+  }
+
+  const plays = works.reduce((a, w) => a + w.plays, 0);
+  const skips = works.reduce((a, w) => a + w.skips, 0);
+  const out = [];
+
+  out.push(`<b>${works.length}</b> track${works.length === 1 ? "" : "s"} in the library.`);
+  out.push(`<b>${plays}</b> play${plays === 1 ? "" : "s"} and <b>${skips}</b> skip${skips === 1 ? "" : "s"} recorded.`);
+  if (plays + skips > 0) out.push(`Skip rate: <b>${Math.round(skips / (plays + skips) * 100)}%</b>.`);
+
+  const mp = works.filter(w => w.plays > 0).sort((a, b) => b.plays - a.plays)[0];
+  if (mp) out.push(`Most played: <b>${esc(mp.title)}</b> (${mp.plays}).`);
+
+  const ms = works.filter(w => w.skips > 0).sort((a, b) => b.skips - a.skips)[0];
+  if (ms) out.push(`Most skipped: <b>${esc(ms.title)}</b> (${ms.skips}).`);
+
+  let bk = null, bv = 0;
+  for (const k in S.transitions) if (S.transitions[k] > bv) { bv = S.transitions[k]; bk = k; }
+  if (bk) {
+    const i = bk.indexOf("|");
+    const wa = find(bk.slice(0, i)), wb = find(bk.slice(i + 1));
+    if (wa && wb) out.push(`Strongest transition: <b>${esc(wa.title)}</b> → <b>${esc(wb.title)}</b> (${bv}×).`);
+  }
+
+  const hrs = {};
+  works.forEach(w => { for (const h in (w.hours || {})) hrs[h] = (hrs[h] || 0) + w.hours[h]; });
+  const bh = Object.keys(hrs).sort((a, b) => hrs[b] - hrs[a])[0];
+  if (bh !== undefined) out.push(`Most active hour: <b>${String(bh).padStart(2, "0")}:00</b> (${hrs[bh]} plays).`);
+
+  const recent = S.events.slice(-1)[0];
+  if (recent) {
+    const w = find(recent.w);
+    if (w) out.push(`Last event: <b>${esc(w.title)}</b> — ${recent.e.toLowerCase()}, ${ago(recent.t)}.`);
+  }
+
+  el.innerHTML = out.map(l => `<li>${l}</li>`).join("");
 }
-// --- AUTOMATIC TRACK CHANGE OVERLAYS ---
-function wirePlayerAdvance(audioElement) {
-if (!audioElement) return;
-audioElement.onended = () => {
-if (currentPlayingWorkId) commitPlaybackTelemetry(currentPlayingWorkId, 'COMPLETE');
-if (activeQueue.length > 0) {
-const nextTrack = activeQueue.shift();
-renderQueueUI();
-dispatchPlayback(nextTrack.workId, nextTrack.title, nextTrack.artist);
-}
-};
-}
-function dispatchPlayback(workId, title, artist) {
-if (currentPlayingWorkId) {
-const audio = document.getElementById('audio');
-if (audio.currentTime < 10) commitPlaybackTelemetry(currentPlayingWorkId, 'SKIP');
-}
-currentPlayingWorkId = workId;
-document.getElementById('player-title').textContent = title;
-document.getElementById('player-artist').textContent = artist || 'Unknown Artist';
-document.getElementById('player').hidden = false;
-// Standalone simulation audio asset (generates light mock silence buffer track)
-const mockSilenceBlob = new Blob([new Uint8Array(44100 * 2)], { type: 'audio/wav' });
-document.getElementById('audio').src = URL.createObjectURL(mockSilenceBlob);
-commitPlaybackTelemetry(workId, 'START');
-document.getElementById('audio').play();
-}
-// --- RE-RENDERING ENGINE CONTEXT ---
-function renderQueueUI() {
-const list = document.getElementById('queue-list'), empty = document.getElementById('queue-empty');
-list.innerHTML = ''; empty.style.display = activeQueue.length ? 'none' : 'block';
-activeQueue.forEach((it, i) => {
-const li = document.createElement('li');
-li.innerHTML = <span><strong>${escapeHtml(it.title)}</strong><span class="reason">predicted index score: ${it.score}</span></span><button class="small" id="q-rm-${i}">×</button>;
-list.appendChild(li);
-li.querySelector(#q-rm-${i}).onclick = () => { activeQueue.splice(i, 1); renderQueueUI(); };
-});
-}
+
 function renderAll() {
-renderQueueUI();
-const list = document.getElementById('list'), empty = document.getElementById('empty'), summary = document.getElementById('library-summary');
-list.innerHTML = ''; let rows = [];
-try {
-const res = db.exec("SELECT id, title, artist FROM works ORDER BY created_at DESC");
-if (res.length) rows = res.values.map(([id, title, artist]) => ({ id, title, artist }));
-} catch (e) {}
-const filtered = rows.filter(r => !searchQuery || r.title.toLowerCase().includes(searchQuery) || r.artist.toLowerCase().includes(searchQuery));
-empty.style.display = filtered.length ? 'none' : 'block';
-summary.textContent = rows.length ? (${filtered.length} total) : '';
-filtered.forEach(s => {
-const li = document.createElement('li');
-li.innerHTML = <span><strong>${escapeHtml(s.title)}</strong><span class="muted"> — ${escapeHtml(s.artist || 'Unknown')}</span></span><div><button class="small" data-play="${s.id}">Play</button><button class="small danger" data-del="${s.id}">×</button></div>;
-list.appendChild(li);
-li.querySelector('[data-play]').onclick = () => dispatchPlayback(s.id, s.title, s.artist);
-li.querySelector('[data-del]').onclick = () => { db.run("DELETE FROM works WHERE id = ?", [s.id]); persist(); renderAll(); };
-});
+  renderLibrary();
+  renderQueue();
+  renderDups();
+  renderFacts();
+  renderNow();
 }
-function escapeHtml(str) { return String(str).replace(/[&<>"']/g, c => ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": ''' }[c])); }
-// --- INTERCEPT WIRINGS ---
-document.getElementById('add').onclick = () => {
-const t = document.getElementById('title').value, a = document.getElementById('artist').value;
-if (!t.trim()) return; db.run("INSERT INTO works (id, title, artist) VALUES (?, ?, ?)", [generateId(), t.trim(), a.trim()]);
-document.getElementById('title').value = ''; document.getElementById('artist').value = ''; persist(); renderAll();
+
+/* ---------- mutations ---------- */
+function addWork(title, artist) {
+  const t = title.trim();
+  if (!t) return;
+  S.works.push({
+    id: uid(), title: t, artist: artist.trim(), addedAt: Date.now(),
+    plays: 0, skips: 0, lastPlayed: null, hours: {}
+  });
+  save();
+  renderAll();
+}
+
+function delWork(id) {
+  if (P.id === id) stop();
+  S.works = S.works.filter(w => w.id !== id);
+  for (const k in S.transitions) {
+    const i = k.indexOf("|");
+    if (k.slice(0, i) === id || k.slice(i + 1) === id) delete S.transitions[k];
+  }
+  Q = Q.filter(x => x.id !== id);
+  save();
+  renderAll();
+}
+
+/* ---------- CSV ---------- */
+function parseCSV(text) {
+  text = text.replace(/^\uFEFF/, "");
+  const rows = [];
+  let row = [], field = "", q = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else q = false;
+      } else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else if (c !== "\r") field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+function importCSV(text) {
+  const rows = parseCSV(text);
+  if (!rows.length) { ioMsg("That file was empty."); return; }
+
+  let hi = -1, ti = -1, ai = -1;
+  for (let i = 0; i < Math.min(rows.length, 5); i++) {
+    const r = rows[i].map(c => c.trim().toLowerCase());
+    const t = r.indexOf("title");
+    const a = r.findIndex(c => c === "artist" || c === "artists" || c === "artist name");
+    if (t >= 0 && a >= 0) { hi = i; ti = t; ai = a; break; }
+  }
+  if (hi < 0) { ioMsg('Could not find "title" and "artist" columns in the first 5 rows.'); return; }
+
+  const seen = new Set(S.works.map(w => norm(w.title) + "|" + norm(w.artist)));
+  let added = 0, duped = 0;
+
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r) continue;
+    const t = (r[ti] || "").trim();
+    if (!t) continue;
+    const a = (r[ai] || "").trim();
+    const k = norm(t) + "|" + norm(a);
+    if (seen.has(k)) { duped++; continue; }
+    seen.add(k);
+    S.works.push({
+      id: uid(), title: t, artist: a, addedAt: Date.now(),
+      plays: 0, skips: 0, lastPlayed: null, hours: {}
+    });
+    added++;
+  }
+
+  save();
+  renderAll();
+  ioMsg(`Imported ${added} track${added === 1 ? "" : "s"}` +
+        (duped ? `, skipped ${duped} duplicate${duped === 1 ? "" : "s"}` : "") + ".");
+}
+
+function ioMsg(t) { $("io-msg").textContent = t; }
+
+/* ---------- wiring ---------- */
+document.addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.play) play(b.dataset.play);
+  else if (b.dataset.del) delWork(b.dataset.del);
+  else if (b.dataset.rm !== undefined) { Q.splice(Number(b.dataset.rm), 1); renderQueue(); }
+});
+
+$("add").onclick = () => {
+  addWork($("title").value, $("artist").value);
+  $("title").value = "";
+  $("artist").value = "";
+  $("title").focus();
 };
-document.getElementById('search').oninput = (e) => { searchQuery = e.target.value.toLowerCase(); renderAll(); };
-document.getElementById('build-queue').onclick = generateSmartQueue;
-document.getElementById('clear-queue').onclick = () => { activeQueue = []; renderQueueUI(); };
-init();
+$("artist").addEventListener("keydown", e => { if (e.key === "Enter") $("add").click(); });
+$("title").addEventListener("keydown", e => { if (e.key === "Enter") $("add").click(); });
+
+$("search").oninput = renderLibrary;
+$("sort").onchange = renderLibrary;
+
+$("build").onclick = buildQueue;
+$("clear").onclick = () => { Q = []; renderQueue(); };
+
+document.querySelectorAll('input[name="mode"]').forEach(r => {
+  r.checked = (r.value === S.mode);
+  r.onchange = () => { if (r.checked) { S.mode = r.value; save(); } };
+});
+
+$("dup-toggle").onclick = () => {
+  const d = $("dups");
+  d.hidden = !d.hidden;
+  $("dup-toggle").textContent = d.hidden ? "show" : "hide";
+  if (!d.hidden) renderDups();
+};
+
+$("refresh").onclick = renderFacts;
+
+$("save-w").onclick = () => {
+  S.weights = readWeights();
+  save();
+  $("w-msg").textContent = "Saved.";
+  setTimeout(() => { $("w-msg").textContent = ""; }, 1500);
+};
+$("reset-w").onclick = () => {
+  S.weights = { ...DEFAULT_WEIGHTS };
+  syncWeights();
+  save();
+  $("w-msg").textContent = "Reset to defaults.";
+  setTimeout(() => { $("w-msg").textContent = ""; }, 1500);
+};
+$("learn").onclick = () => {
+  S.learning = !S.learning;
+  $("learn").textContent = "Learning: " + (S.learning ? "on" : "off");
+  save();
+};
+
+$("dl").onclick = () => {
+  const blob = new Blob([JSON.stringify(S, null, 1)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "musync-library.json";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
+$("ul").onclick = () => $("ul-file").click();
+$("ul-file").onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const d = JSON.parse(r.result);
+      if (!d || !Array.isArray(d.works)) throw new Error("not a muSync library file");
+      stop();
+      Q = []; lastId = null;
+      const b = blank();
+      S = {
+        works: d.works,
+        transitions: d.transitions && typeof d.transitions === "object" ? d.transitions : {},
+        events: Array.isArray(d.events) ? d.events : [],
+        weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) },
+        learning: d.learning !== false,
+        mode: ["none", "random", "smart"].includes(d.mode) ? d.mode : b.mode
+      };
+      document.querySelectorAll('input[name="mode"]').forEach(x => { x.checked = (x.value === S.mode); });
+      $("learn").textContent = "Learning: " + (S.learning ? "on" : "off");
+      syncWeights();
+      save();
+      renderAll();
+      ioMsg("Library restored: " + S.works.length + " tracks.");
+    } catch (err) {
+      ioMsg("Could not restore: " + err.message);
+    }
+  };
+  r.readAsText(f);
+  e.target.value = "";
+};
+
+$("csv-btn").onclick = () => $("csv-file").click();
+$("csv-file").onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => importCSV(r.result);
+  r.readAsText(f);
+  e.target.value = "";
+};
+
+/* ---------- boot ---------- */
+syncWeights();
+$("learn").textContent = "Learning: " + (S.learning ? "on" : "off");
+renderAll();
+</script>
+</body>
+</html>
