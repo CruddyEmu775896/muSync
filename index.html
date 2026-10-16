@@ -95,7 +95,7 @@ code{background:#101014;padding:1px 4px;border-radius:4px;font-size:12px}
       <button id="build">Build queue from library</button>
       <button id="clear" class="ghost">Clear queue</button>
     </div>
-    <p class="muted" style="margin:10px 0 0">Playback is simulated in this single-file build (no audio files are attached to tracks). Each virtual track runs 20&nbsp;s so the algorithm has something to learn from.</p>
+    <p class="muted" style="margin:10px 0 0">Playback is simulated in this single-file build (no audio files are attached to tracks). Each virtual track runs 20&nbsp;s so the algorithm has something t[...]</p>
     <h3>Queue</h3>
     <ul id="queue"></ul>
     <p id="queue-empty" class="muted">No queue yet.</p>
@@ -140,7 +140,7 @@ code{background:#101014;padding:1px 4px;border-radius:4px;font-size:12px}
 
   <section class="panel">
     <h2>Import from CSV</h2>
-    <p class="muted">Works with Spotify and YouTube Music exports. Needs a <code>title</code> column and an <code>artist</code> column. Artists separated by semicolons are preserved as multiple credits; “feat.” inside artist strings is kept as-is.</p>
+    <p class="muted">Works with Spotify and YouTube Music exports. Needs a <code>title</code> column and an <code>artist</code> column. Artists separated by semicolons are preserved as multiple credit[...]</p>
     <button id="csv-btn">Upload CSV</button>
     <input type="file" id="csv-file" accept=".csv,text/csv" hidden>
     <p id="io-msg" class="muted" style="margin:10px 0 0"></p>
@@ -169,7 +169,7 @@ const QUEUE_CAP = 500;     // keep the greedy sort fast on big libraries
 const EVENT_CAP = 200;
 
 const $ = id => document.getElementById(id);
-const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+const esc = s => String(s == null ? "" : s).replace(/[&<>\"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
