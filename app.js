@@ -1,4 +1,3 @@
-// app.js
 const $ = (sel) => document.querySelector(sel);
 
 // --- State ---
@@ -6,6 +5,7 @@ let library = JSON.parse(localStorage.getItem('muSync_library')) || [];
 let queue = [];
 let currentIndex = -1;
 let currentMode = 'smart';
+let currentAudioUrl = null; // Keeps track of the currently playing audio URL
 
 // --- Init ---
 function init() {
@@ -13,24 +13,34 @@ function init() {
   renderQueue();
   updateCounts();
   
-  // Event Listeners
+  // Event Listeners for main UI
   $('#add').addEventListener('click', addSong);
   $('#search').addEventListener('input', renderLibrary);
   $('#sort').addEventListener('change', renderLibrary);
   $('#build').addEventListener('click', buildQueue);
   $('#clear').addEventListener('click', clearQueue);
+  
+  // Player Controls
   $('#skip').addEventListener('click', playNext);
   $('#stop').addEventListener('click', stopPlayback);
   
+  // Playback Mode Radios
   document.querySelectorAll('input[name="mode"]').forEach(radio => {
     radio.addEventListener('change', (e) => { currentMode = e.target.value; });
   });
+
+  // Backup & Import Listeners
+  $('#dl').addEventListener('click', downloadLibrary);
+  $('#ul').addEventListener('click', () => $('#ul-file').click());
+  $('#ul-file').addEventListener('change', uploadLibrary);
+  $('#csv-btn').addEventListener('click', () => $('#csv-file').click());
+  $('#csv-file').addEventListener('change', importCSV);
 
   // Restore last played song if exists
   const lastPlayed = localStorage.getItem('muSync_lastPlayed');
   if (lastPlayed && library.length > 0) {
     const song = library.find(s => s.id === lastPlayed);
-    if (song) loadSong(song);
+    if (song) loadSong(song, false); // Load but don't auto-play
   }
 }
 
@@ -40,20 +50,36 @@ function addSong() {
   const artist = $('#artist').value.trim();
   if (!title || !artist) return alert('Please enter both title and artist.');
 
-  const newSong = {
-    id: Date.now().toString(),
-    title,
-    artist,
-    added: Date.now(),
-    plays: 0
-  };
+  // Create a hidden file input to let the user pick an audio file
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'audio/*';
+  
+  fileInput.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-  library.push(newSong);
-  saveLibrary();
-  $('#title').value = '';
-  $('#artist').value = '';
-  renderLibrary();
-  updateCounts();
+    // Create a temporary local URL for the audio file
+    const audioUrl = URL.createObjectURL(file);
+
+    const newSong = {
+      id: Date.now().toString(),
+      title,
+      artist,
+      audioUrl: audioUrl,
+      added: Date.now(),
+      plays: 0
+    };
+
+    library.push(newSong);
+    saveLibrary();
+    $('#title').value = '';
+    $('#artist').value = '';
+    renderLibrary();
+    updateCounts();
+  };
+  
+  fileInput.click();
 }
 
 function saveLibrary() {
@@ -119,7 +145,6 @@ function buildQueue() {
   if (currentMode === 'random') {
     queue.sort(() => Math.random() - 0.5);
   } else if (currentMode === 'smart') {
-    // Simple smart shuffle: sort by least played, then random
     queue.sort((a, b) => a.plays - b.plays || Math.random() - 0.5);
   }
   
@@ -160,7 +185,7 @@ function playNext() {
   if (queue.length === 0) return;
   currentIndex = (currentIndex + 1) % queue.length;
   const song = queue[currentIndex];
-  loadSong(song);
+  loadSong(song, true);
 }
 
 function playSong(id) {
@@ -174,42 +199,130 @@ function playSong(id) {
   }
   
   currentIndex = queue.findIndex(s => s.id === id);
-  loadSong(song);
+  loadSong(song, true);
 }
 
-function loadSong(song) {
+function loadSong(song, autoPlay = true) {
   $('#player').hidden = false;
   $('#np-title').textContent = song.title;
   $('#np-artist').textContent = song.artist;
   
-  // Increment play count
-  song.plays++;
-  saveLibrary();
-  renderLibrary();
+  // Revoke old URL to save memory
+  if (currentAudioUrl) {
+    URL.revokeObjectURL(currentAudioUrl);
+  }
+  
+  const audioElement = $('#audio');
+  
+  // If the song has an actual audio file attached
+  if (song.audioUrl) {
+    currentAudioUrl = song.audioUrl;
+    audioElement.src = currentAudioUrl;
+    
+    if (autoPlay) {
+      audioElement.play().catch(e => console.log("Playback blocked by browser:", e));
+      
+      // Increment play count
+      song.plays++;
+      saveLibrary();
+      renderLibrary();
+    }
+  } else {
+    // Fallback if no audio file was uploaded (e.g., imported from CSV)
+    audioElement.src = '';
+    alert("This song doesn't have a local audio file attached.");
+  }
   
   // Track last played
   localStorage.setItem('muSync_lastPlayed', song.id);
-  
-  // Since you don't have actual audio files, we simulate playback
-  // In a real app, you'd set the <audio> src here
-  $('#np-progress').style.width = '0%';
-  let progress = 0;
-  window.playInterval = setInterval(() => {
-    progress += 2;
-    $('#np-progress').style.width = `${progress}%`;
-    if (progress >= 100) {
-      clearInterval(window.playInterval);
-      playNext();
-    }
-  }, 1000); // 50 seconds simulated playback
-  
   renderQueue();
 }
 
+// Handle audio ending
+$('#audio').addEventListener('ended', playNext);
+
 function stopPlayback() {
-  clearInterval(window.playInterval);
-  $('#np-progress').style.width = '0%';
+  const audioElement = $('#audio');
+  audioElement.pause();
+  audioElement.currentTime = 0;
   $('#player').hidden = true;
+}
+
+// --- Backup & Import ---
+function downloadLibrary() {
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(library));
+  const downloadAnchorNode = document.createElement('a');
+  downloadAnchorNode.setAttribute("href", dataStr);
+  downloadAnchorNode.setAttribute("download", "musync_backup.json");
+  document.body.appendChild(downloadAnchorNode);
+  downloadAnchorNode.click();
+  downloadAnchorNode.remove();
+}
+
+function uploadLibrary(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const importedData = JSON.parse(e.target.result);
+      if (Array.isArray(importedData)) {
+        library = importedData;
+        saveLibrary();
+        renderLibrary();
+        updateCounts();
+        alert("Library restored successfully!");
+      } else {
+        alert("Invalid backup file format.");
+      }
+    } catch (err) {
+      alert("Error reading file: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function importCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const text = e.target.result;
+    const lines = text.split('\n');
+    let importedCount = 0;
+    
+    // Simple CSV parser (assumes format: Title, Artist)
+    for (let i = 1; i < lines.length; i++) { // Skip header row
+      const line = lines[i].trim();
+      if (!line) continue;
+      
+      // Handle simple comma separation (doesn't handle quotes with commas perfectly, but works for basic exports)
+      const parts = line.split(',');
+      if (parts.length >= 2) {
+        const title = parts[0].replace(/^"|"$/g, '').trim();
+        const artist = parts[1].replace(/^"|"$/g, '').trim();
+        
+        if (title && artist) {
+          library.push({
+            id: Date.now().toString() + i,
+            title: title,
+            artist: artist,
+            added: Date.now(),
+            plays: 0
+          });
+          importedCount++;
+        }
+      }
+    }
+    
+    saveLibrary();
+    renderLibrary();
+    updateCounts();
+    alert(`Imported ${importedCount} songs from CSV.`);
+  };
+  reader.readAsText(file);
 }
 
 // Start the app
