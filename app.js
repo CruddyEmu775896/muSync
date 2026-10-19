@@ -5,7 +5,7 @@ let library = JSON.parse(localStorage.getItem('muSync_library')) || [];
 let queue = [];
 let currentIndex = -1;
 let currentMode = 'smart';
-let currentAudioUrl = null; // Keeps track of the currently playing audio URL
+let currentAudioUrl = null;
 
 // --- Init ---
 function init() {
@@ -13,34 +13,39 @@ function init() {
   renderQueue();
   updateCounts();
   
-  // Event Listeners for main UI
+  // Core UI
   $('#add').addEventListener('click', addSong);
   $('#search').addEventListener('input', renderLibrary);
   $('#sort').addEventListener('change', renderLibrary);
   $('#build').addEventListener('click', buildQueue);
   $('#clear').addEventListener('click', clearQueue);
   
-  // Player Controls
+  // Player
   $('#skip').addEventListener('click', playNext);
   $('#stop').addEventListener('click', stopPlayback);
+  $('#audio').addEventListener('ended', playNext);
   
-  // Playback Mode Radios
+  // Modes
   document.querySelectorAll('input[name="mode"]').forEach(radio => {
     radio.addEventListener('change', (e) => { currentMode = e.target.value; });
   });
 
-  // Backup & Import Listeners
+  // --- BACKUP & IMPORT LISTENERS ---
   $('#dl').addEventListener('click', downloadLibrary);
+  
+  // Trigger the hidden file input when "Upload library" is clicked
   $('#ul').addEventListener('click', () => $('#ul-file').click());
   $('#ul-file').addEventListener('change', uploadLibrary);
+  
+  // Trigger the hidden file input when "Upload CSV" is clicked
   $('#csv-btn').addEventListener('click', () => $('#csv-file').click());
   $('#csv-file').addEventListener('change', importCSV);
 
-  // Restore last played song if exists
+  // Restore last played
   const lastPlayed = localStorage.getItem('muSync_lastPlayed');
   if (lastPlayed && library.length > 0) {
     const song = library.find(s => s.id === lastPlayed);
-    if (song) loadSong(song, false); // Load but don't auto-play
+    if (song) loadSong(song, false);
   }
 }
 
@@ -50,7 +55,6 @@ function addSong() {
   const artist = $('#artist').value.trim();
   if (!title || !artist) return alert('Please enter both title and artist.');
 
-  // Create a hidden file input to let the user pick an audio file
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
   fileInput.accept = 'audio/*';
@@ -59,7 +63,6 @@ function addSong() {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Create a temporary local URL for the audio file
     const audioUrl = URL.createObjectURL(file);
 
     const newSong = {
@@ -96,7 +99,6 @@ function renderLibrary() {
     s.artist.toLowerCase().includes(search)
   );
 
-  // Sorting
   if (sort === 'added-desc') filtered.sort((a, b) => b.added - a.added);
   if (sort === 'added-asc') filtered.sort((a, b) => a.added - b.added);
   if (sort === 'title') filtered.sort((a, b) => a.title.localeCompare(b.title));
@@ -184,15 +186,13 @@ function renderQueue() {
 function playNext() {
   if (queue.length === 0) return;
   currentIndex = (currentIndex + 1) % queue.length;
-  const song = queue[currentIndex];
-  loadSong(song, true);
+  loadSong(queue[currentIndex], true);
 }
 
 function playSong(id) {
   const song = library.find(s => s.id === id);
   if (!song) return;
   
-  // Add to queue if not there
   if (!queue.find(s => s.id === id)) {
     queue.push(song);
     renderQueue();
@@ -207,39 +207,28 @@ function loadSong(song, autoPlay = true) {
   $('#np-title').textContent = song.title;
   $('#np-artist').textContent = song.artist;
   
-  // Revoke old URL to save memory
-  if (currentAudioUrl) {
-    URL.revokeObjectURL(currentAudioUrl);
-  }
+  if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
   
   const audioElement = $('#audio');
   
-  // If the song has an actual audio file attached
   if (song.audioUrl) {
     currentAudioUrl = song.audioUrl;
     audioElement.src = currentAudioUrl;
     
     if (autoPlay) {
-      audioElement.play().catch(e => console.log("Playback blocked by browser:", e));
-      
-      // Increment play count
+      audioElement.play().catch(e => console.log("Playback blocked:", e));
       song.plays++;
       saveLibrary();
       renderLibrary();
     }
   } else {
-    // Fallback if no audio file was uploaded (e.g., imported from CSV)
     audioElement.src = '';
     alert("This song doesn't have a local audio file attached.");
   }
   
-  // Track last played
   localStorage.setItem('muSync_lastPlayed', song.id);
   renderQueue();
 }
-
-// Handle audio ending
-$('#audio').addEventListener('ended', playNext);
 
 function stopPlayback() {
   const audioElement = $('#audio');
@@ -248,9 +237,11 @@ function stopPlayback() {
   $('#player').hidden = true;
 }
 
-// --- Backup & Import ---
+// --- BACKUP & IMPORT LOGIC ---
 function downloadLibrary() {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(library));
+  if (library.length === 0) return alert("Your library is empty!");
+  
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(library, null, 2));
   const downloadAnchorNode = document.createElement('a');
   downloadAnchorNode.setAttribute("href", dataStr);
   downloadAnchorNode.setAttribute("download", "musync_backup.json");
@@ -279,6 +270,8 @@ function uploadLibrary(event) {
     } catch (err) {
       alert("Error reading file: " + err.message);
     }
+    // Reset input so the same file can be uploaded again if needed
+    event.target.value = '';
   };
   reader.readAsText(file);
 }
@@ -293,12 +286,10 @@ function importCSV(event) {
     const lines = text.split('\n');
     let importedCount = 0;
     
-    // Simple CSV parser (assumes format: Title, Artist)
-    for (let i = 1; i < lines.length; i++) { // Skip header row
+    for (let i = 1; i < lines.length; i++) { // Skip header
       const line = lines[i].trim();
       if (!line) continue;
       
-      // Handle simple comma separation (doesn't handle quotes with commas perfectly, but works for basic exports)
       const parts = line.split(',');
       if (parts.length >= 2) {
         const title = parts[0].replace(/^"|"$/g, '').trim();
@@ -320,14 +311,15 @@ function importCSV(event) {
     saveLibrary();
     renderLibrary();
     updateCounts();
-    alert(`Imported ${importedCount} songs from CSV.`);
+    alert(`Imported ${importedCount} songs from CSV. Note: You will need to attach audio files manually.`);
+    event.target.value = ''; // Reset input
   };
   reader.readAsText(file);
 }
 
-// Start the app
+// Start
 document.addEventListener('DOMContentLoaded', init);
 
-// Make functions global for inline onclick handlers
+// Global functions for inline onclick
 window.playSong = playSong;
 window.deleteSong = deleteSong;
