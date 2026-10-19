@@ -6,13 +6,23 @@ let queue = [];
 let currentIndex = -1;
 let currentMode = 'smart';
 let currentAudioUrl = null;
+let SQL = null; // Holds the SQLite engine
 
 // --- Init ---
-function init() {
+async function init() {
   renderLibrary();
   renderQueue();
   updateCounts();
   
+  // Initialize the SQLite engine for .db support
+  try {
+    SQL = await initSqlJs({
+      locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+    });
+  } catch (e) {
+    console.warn("SQL.js failed to load. .db imports might not work.", e);
+  }
+
   // Core UI
   $('#add').addEventListener('click', addSong);
   $('#search').addEventListener('input', renderLibrary);
@@ -30,14 +40,10 @@ function init() {
     radio.addEventListener('change', (e) => { currentMode = e.target.value; });
   });
 
-  // --- BACKUP & IMPORT LISTENERS ---
+  // Backup & Import
   $('#dl').addEventListener('click', downloadLibrary);
-  
-  // Trigger the hidden file input when "Upload library" is clicked
   $('#ul').addEventListener('click', () => $('#ul-file').click());
   $('#ul-file').addEventListener('change', uploadLibrary);
-  
-  // Trigger the hidden file input when "Upload CSV" is clicked
   $('#csv-btn').addEventListener('click', () => $('#csv-file').click());
   $('#csv-file').addEventListener('change', importCSV);
 
@@ -62,9 +68,7 @@ function addSong() {
   fileInput.onchange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const audioUrl = URL.createObjectURL(file);
-
     const newSong = {
       id: Date.now().toString(),
       title,
@@ -73,7 +77,6 @@ function addSong() {
       added: Date.now(),
       plays: 0
     };
-
     library.push(newSong);
     saveLibrary();
     $('#title').value = '';
@@ -81,7 +84,6 @@ function addSong() {
     renderLibrary();
     updateCounts();
   };
-  
   fileInput.click();
 }
 
@@ -141,15 +143,12 @@ function updateCounts() {
 // --- Playback & Queue ---
 function buildQueue() {
   if (library.length === 0) return alert('Add some songs first!');
-  
   queue = [...library];
-  
   if (currentMode === 'random') {
     queue.sort(() => Math.random() - 0.5);
   } else if (currentMode === 'smart') {
     queue.sort((a, b) => a.plays - b.plays || Math.random() - 0.5);
   }
-  
   currentIndex = -1;
   renderQueue();
   playNext();
@@ -165,7 +164,6 @@ function clearQueue() {
 function renderQueue() {
   const qList = $('#queue');
   qList.innerHTML = '';
-  
   if (queue.length === 0) {
     $('#queue-empty').style.display = 'block';
   } else {
@@ -192,12 +190,10 @@ function playNext() {
 function playSong(id) {
   const song = library.find(s => s.id === id);
   if (!song) return;
-  
   if (!queue.find(s => s.id === id)) {
     queue.push(song);
     renderQueue();
   }
-  
   currentIndex = queue.findIndex(s => s.id === id);
   loadSong(song, true);
 }
@@ -208,13 +204,11 @@ function loadSong(song, autoPlay = true) {
   $('#np-artist').textContent = song.artist;
   
   if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
-  
   const audioElement = $('#audio');
   
   if (song.audioUrl) {
     currentAudioUrl = song.audioUrl;
     audioElement.src = currentAudioUrl;
-    
     if (autoPlay) {
       audioElement.play().catch(e => console.log("Playback blocked:", e));
       song.plays++;
@@ -225,7 +219,6 @@ function loadSong(song, autoPlay = true) {
     audioElement.src = '';
     alert("This song doesn't have a local audio file attached.");
   }
-  
   localStorage.setItem('muSync_lastPlayed', song.id);
   renderQueue();
 }
@@ -237,10 +230,9 @@ function stopPlayback() {
   $('#player').hidden = true;
 }
 
-// --- BACKUP & IMPORT LOGIC ---
+// --- BACKUP & IMPORT LOGIC (Supports JSON, DB, CSV) ---
 function downloadLibrary() {
   if (library.length === 0) return alert("Your library is empty!");
-  
   const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(library, null, 2));
   const downloadAnchorNode = document.createElement('a');
   downloadAnchorNode.setAttribute("href", dataStr);
@@ -250,51 +242,107 @@ function downloadLibrary() {
   downloadAnchorNode.remove();
 }
 
-function uploadLibrary(event) {
+async function uploadLibrary(event) {
   const file = event.target.files[0];
   if (!file) return;
-  
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    try {
-      const importedData = JSON.parse(e.target.result);
-      if (Array.isArray(importedData)) {
-        library = importedData;
+
+  // Handle .db or .sqlite files
+  if (file.name.endsWith('.db') || file.name.endsWith('.sqlite')) {
+    if (!SQL) return alert("SQL engine not loaded. Please check your internet connection and refresh.");
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const uint8Array = new Uint8Array(e.target.result);
+        const db = new SQL.Database(uint8Array);
+        
+        // Find the first table
+        const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
+        if (tables.length === 0) throw new Error("No tables found in database.");
+        const tableName = tables[0].values[0][0];
+
+        // Fetch all data
+        const res = db.exec(`SELECT * FROM ${tableName}`);
+        if (res.length === 0) throw new Error("Table is empty.");
+        
+        const columns = res[0].columns.map(c => c.toLowerCase());
+        const values = res[0].values;
+        
+        // Try to guess the Title and Artist columns
+        const titleIdx = columns.findIndex(c => c.includes('title') || c.includes('name') || c.includes('song'));
+        const artistIdx = columns.findIndex(c => c.includes('artist') || c.includes('band') || c.includes('author'));
+
+        if (titleIdx === -1 || artistIdx === -1) {
+          throw new Error("Could not find 'title' and 'artist' columns in the database.");
+        }
+
+        let importedCount = 0;
+        values.forEach((row, i) => {
+          const title = row[titleIdx] ? row[titleIdx].toString() : 'Unknown Title';
+          const artist = row[artistIdx] ? row[artistIdx].toString() : 'Unknown Artist';
+          
+          library.push({
+            id: Date.now().toString() + i,
+            title: title,
+            artist: artist,
+            added: Date.now(),
+            plays: 0
+          });
+          importedCount++;
+        });
+
         saveLibrary();
         renderLibrary();
         updateCounts();
-        alert("Library restored successfully!");
-      } else {
-        alert("Invalid backup file format.");
+        alert(`Successfully imported ${importedCount} songs from the database!`);
+        event.target.value = '';
+
+      } catch (err) {
+        alert("Error reading DB file: " + err.message);
+        event.target.value = '';
       }
-    } catch (err) {
-      alert("Error reading file: " + err.message);
-    }
-    // Reset input so the same file can be uploaded again if needed
-    event.target.value = '';
-  };
-  reader.readAsText(file);
+    };
+    reader.readAsArrayBuffer(file);
+
+  } else {
+    // Handle .json files
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const importedData = JSON.parse(e.target.result);
+        if (Array.isArray(importedData)) {
+          library = importedData;
+          saveLibrary();
+          renderLibrary();
+          updateCounts();
+          alert("Library restored successfully from JSON!");
+        } else {
+          alert("Invalid backup file format.");
+        }
+      } catch (err) {
+        alert("Error reading JSON: " + err.message);
+      }
+      event.target.value = '';
+    };
+    reader.readAsText(file);
+  }
 }
 
 function importCSV(event) {
   const file = event.target.files[0];
   if (!file) return;
-  
   const reader = new FileReader();
   reader.onload = function(e) {
     const text = e.target.result;
     const lines = text.split('\n');
     let importedCount = 0;
-    
-    for (let i = 1; i < lines.length; i++) { // Skip header
+    for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
-      
       const parts = line.split(',');
       if (parts.length >= 2) {
         const title = parts[0].replace(/^"|"$/g, '').trim();
         const artist = parts[1].replace(/^"|"$/g, '').trim();
-        
         if (title && artist) {
           library.push({
             id: Date.now().toString() + i,
@@ -307,12 +355,11 @@ function importCSV(event) {
         }
       }
     }
-    
     saveLibrary();
     renderLibrary();
     updateCounts();
-    alert(`Imported ${importedCount} songs from CSV. Note: You will need to attach audio files manually.`);
-    event.target.value = ''; // Reset input
+    alert(`Imported ${importedCount} songs from CSV.`);
+    event.target.value = '';
   };
   reader.readAsText(file);
 }
