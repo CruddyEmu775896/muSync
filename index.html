@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>muSync — Local-first music organizer</title>
+  <link rel="stylesheet" href="styles.css">
+  
+  <!-- SQLite Engine for reading .db files -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+</head>
+<body>
+<header>
+  <h1>muSync</h1>
+  <p class="muted" style="margin:2px 0 0">Local-first music organizer</p>
+</header>
+<main>
+  <!-- ADD SONG -->
+  <section class="panel">
+    <h2>Add a song</h2>
+    <div class="row">
+      <input id="title" placeholder="Song title" autocomplete="off">
+      <input id="artist" placeholder="Artist — feat. Artist" autocomplete="off">
+      <button id="add">Add</button>
+    </div>
+    <p class="muted" style="margin-top: 10px; font-size: 12px;">
+      Add the song name first. You can attach the audio file from the library list.
+    </p>
+  </section>
+
+  <!-- LIBRARY -->
+  <section class="panel">
+    <h2>Library <span id="lib-count" class="muted s"></span></h2>
+    <div class="row" style="margin-bottom:8px">
+      <input id="search" placeholder="Search title, artist" autocomplete="off">
+      <select id="sort">
+        <option value="added-desc">Date added (newest)</option>
+        <option value="added-asc">Date added (oldest)</option>
+        <option value="title">Title (A–Z)</option>
+        <option value="artist">Artist (A–Z)</option>
+        <option value="plays">Most played</option>
+      </select>
+    </div>
+    <ul id="list"></ul>
+    <p id="empty" class="muted">No songs yet.</p>
+  </section>
+
+  <!-- PLAYBACK -->
+  <section class="panel">
+    <h2>Playback</h2>
+    <p class="muted">Choose how the next song gets picked. Smart uses your listening history.</p>
+    <div class="radios">
+      <label><input type="radio" name="mode" value="none"> No shuffle (manual order)</label>
+      <label><input type="radio" name="mode" value="random"> Random</label>
+      <label><input type="radio" name="mode" value="smart" checked> Smart</label>
+    </div>
+    <div class="row">
+      <button id="build">Build queue from library</button>
+      <button id="clear" class="ghost">Clear queue</button>
+    </div>
+    <h3>Queue</h3>
+    <ul id="queue"></ul>
+    <p id="queue-empty" class="muted">No queue yet.</p>
+  </section>
+
+  <!-- DUPLICATES -->
+  <section class="panel">
+    <h2>Duplicates <button id="dup-toggle" class="mini">show</button></h2>
+    <div id="dups" hidden>
+      <p class="muted">Duplicate detection logic coming soon.</p>
+    </div>
+  </section>
+
+  <!-- KNOWLEDGE -->
+  <section class="panel">
+    <h2>What I know about you</h2>
+    <p class="muted">Every fact the algorithm has about your listening. Nothing is hidden.</p>
+    <ul id="facts">
+      <li class="muted">Listening data will appear here once you play songs.</li>
+    </ul>
+    <button id="refresh" class="mini" style="margin-top:10px">Refresh</button>
+  </section>
+
+  <!-- ALGORITHM SETTINGS -->
+  <section class="panel">
+    <h2>Algorithm settings</h2>
+    <div class="wrow"><span>Transition history strength (A → B)</span><input type="number" id="w-transition" min="0" max="100" value="50"></div>
+    <div class="wrow"><span>Novelty boost (time since last heard)</span><input type="number" id="w-novelty" min="0" max="100" value="30"></div>
+    <div class="wrow"><span>Time-of-day routine match</span><input type="number" id="w-timeOfDay" min="0" max="100" value="20"></div>
+    <div class="wrow"><span>Skip suppression penalty</span><input type="number" id="w-skipPenalty" min="0" max="100" value="40"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="save-w">Save weights</button>
+      <button id="reset-w" class="ghost">Reset to defaults</button>
+      <button id="learn" class="ghost">Learning: on</button>
+      <span id="w-msg" class="muted s"></span>
+    </div>
+  </section>
+
+  <!-- BACKUP -->
+  <section class="panel">
+    <h2>Backup</h2>
+    <div class="row">
+      <button id="dl">Download library</button>
+      <button id="ul" class="ghost">Upload library</button>
+      <input type="file" id="ul-file" accept=".json,.db,.sqlite,application/json,application/octet-stream" hidden>
+    </div>
+  </section>
+
+  <!-- IMPORT CSV -->
+  <section class="panel">
+    <h2>Import from CSV</h2>
+    <button id="csv-btn">Upload CSV</button>
+    <input type="file" id="csv-file" accept=".csv,text/csv" hidden>
+    <p id="io-msg" class="muted" style="margin:10px 0 0"></p>
+  </section>
+
+</main>
+
+<!-- REAL PLAYER BAR -->
+<div class="player" id="player" hidden>
+  <div class="meta">
+    <div id="np-title" class="t">—</div>
+    <div id="np-artist" class="muted s"></div>
+  </div>
+  <audio id="audio" controls preload="metadata" style="flex: 1; max-width: 300px; height: 36px;"></audio>
+  <button id="skip" class="mini">Skip</button>
+  <button id="stop" class="mini">Stop</button>
+</div>
+
+<script src="app.js" defer></script>
+</body>
+</html>
